@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E2 · 选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3 cur" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">E2 · Track E · 完整成熟的 Tiled GEMM · 55 分钟 · 中</div><h1>E2 · 选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</h1><p class="lede">CuTe 能告诉你一个配置合不合法、能生成它的代码，但不会替你选 tile、stage 数、warp group 安排和 swizzle。本题把 Hopper 上的硬约束（wgmma 形状、TMA box、SMEM 容量、寄存器）写成检查器，再写一个带 L2 复用、wave 量化和流水线延迟的代价模型，在 972 个配置里排序，并和 CUTLASS 常用的选择对照：模型能筛掉不合法的配置、指出趋势，最终选择仍然要实测。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/e2_config_search.py"><code>mine/e2_config_search.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_e2_config_search.py"><code>tests/test_e2_config_search.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/e2_config_search.py"><code>solutions/e2_config_search.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="E2"> 我已完成这道题</label></header>
+<h2 id="e2-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/algebra_compile.html">Layout Algebra 与编译</a> 里“编译期能检查什么、不能决定什么”，以及 <a href="../knowledge/real_code.html">真实代码导读</a>。</li>
+<li><strong>在体系里的位置</strong>：CUTLASS 的 CollectiveBuilder（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl">sm90_gmma_builder.inl</a>）用 SMEM 容量减去 epilogue 的 carveout，再除以每个 stage 的字节数得到 stage 数；kernel 用 <code>LoadRegisterRequirement = 40 / MmaRegisterRequirement = 232</code> 重新分配寄存器（D3）。tile 形状和 schedule 则由用户在 CUTLASS 的例子或 profiler 里手选。</li>
+<li><strong>你要实现</strong>：<code>smem_bytes</code>、<code>acc_regs_per_thread</code>、<code>violations</code>、<code>estimate</code>、<code>search</code>、<code>default_space</code>。常量、<code>GPU</code>、<code>H100_SXM</code> 和 <code>Config</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>合法性按固定顺序检查：<code>wgmma_m</code>、<code>wgmma_n</code>、<code>swizzle</code>、<code>tma_box</code>、<code>smem</code>、<code>acc_regs</code>、<code>regs</code>、<code>stages</code>，返回所有违反的规则。</li>
+<li>cooperative 两个 WG 合算一个 tile（每个 WG 64 行起，所以 BM 要是 128 的倍数），累加器 <code>BM·BN / 256</code> 个寄存器每线程；pingpong 每个 WG 持有整个 tile，<code>BM·BN / 128</code>。</li>
+<li>每个 k-tile 的时间 <code>step = max(t_mma_k, t_load_k, (lat + t_load_k) / stages)</code>：stage 太少时延迟藏不住。</li>
+<li>L2 复用：一个 wave 里同时运行的 tile 共享 A、B panel，只有不同的 panel 才从 HBM 读。</li>
+<li>排序键是 <code>(total, config)</code>：并列时按配置字段升序，结果确定。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：<code>smem_bytes(128×128×64, 4) = 139328</code>、累加器寄存器 64 / 128 · 每条规则各一个违反的例子 · 多条违反按顺序全报 · regs 规则读 GPU 的寄存器文件 · 128×128×64×4 cooperative 的 tiles / waves / step / total / TFLOP/s · pingpong 的 waves 与 total · 2 个 stage 比 4 个慢（216.5 vs 159.9 µs）· 窄 swizzle 更慢 · L2 复用降低 step · 搜索空间 972 个、合法 357 个、排序与第一名、并列时的次序 · 小问题选小 tile。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>wgmma</strong>（warpgroup MMA）：Hopper 的 tensor core 指令，一个 warp group 一次算 M = 64、N ∈ {8, 16, …, 256} 的块。</li>
+<li><strong>cooperative / pingpong</strong>：CUTLASS sm90 的两种 warp-specialized kernel schedule（D3）。</li>
+<li><strong>wave</strong>：GPU 一次能同时放下的 CTA 数（这里每个 SM 一个）。tiles 不是 SM 数的整数倍时，最后一个 wave 不满，叫 <strong>wave quantization</strong>（波量化）损失。</li>
+<li><strong>carveout</strong>：从 SMEM 里预留给 epilogue 等其他用途的字节数，剩下的才给主循环的 stage。</li>
+<li><strong>roofline</strong>：时间取“算力限制”和“带宽限制”中较大的一个。</li>
+</ul>
+</div>
+<h2 id="e2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 给一间工作室排班</div><p>SM 是一间工作室，SMEM 是工作台面积，寄存器是每个工人手边的抽屉。tile 越大，一次加工的件越多、来回搬料的次数越少（算术强度高），但工作台要放得下 stages 份料（smem），工人的抽屉要放得下手上的半成品（累加器寄存器）。stage 数是台面上同时摆几份料：太少，工人做完一份要等下一份从仓库运来（延迟藏不住）；太多，台面放不下。pingpong 像两个工人共用一台机器：一个在打包（epilogue）时另一个用机器，机器不闲着，但每个人的抽屉要放下整件半成品。最后，100 份订单分给 132 间工作室，有 32 间闲着；1024 份订单要 8 轮，最后一轮只开 100 间：这就是 wave 量化。</p>
+</div>
+<h2 id="e2-3">图解：一个配置的生死与快慢</h2>
+
+<figure class="flow"><div class="flow-head">Config → violations → estimate → 排名<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;Config → violations → estimate → 排名&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;cfg&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;Config&quot;, &quot;s&quot;: &quot;tile · stages · 调度&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;shp&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;形状约束&quot;, &quot;s&quot;: &quot;wgmma · swizzle · box&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;res&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;资源约束&quot;, &quot;s&quot;: &quot;smem · 寄存器 · stages&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;每个 k-tile&quot;, &quot;s&quot;: &quot;t_mma · t_load&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pl&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;流水线&quot;, &quot;s&quot;: &quot;延迟 / stages&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;wv&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;wave&quot;, &quot;s&quot;: &quot;ceil(tiles / 并发)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rk&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;排序&quot;, &quot;s&quot;: &quot;(total, config)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;cfg&quot;, &quot;b&quot;: &quot;shp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cfg&quot;, &quot;b&quot;: &quot;res&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;shp&quot;, &quot;b&quot;: &quot;kt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;res&quot;, &quot;b&quot;: &quot;pl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;wv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;pl&quot;, &quot;b&quot;: &quot;wv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;wv&quot;, &quot;b&quot;: &quot;rk&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 220.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>约束是硬的：违反一条就不参加排序。代价模型是软的：它只负责把明显差的配置排到后面，相近的配置之间的先后不可信。</figcaption></figure>
+<h2 id="e2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 4096³ 上的 128×128×64、stages = 4：从合法性到 159.9 µs</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;smem&quot;, &quot;s&quot;: &quot;139328 B&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ar&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;acc_regs&quot;, &quot;s&quot;: &quot;64 / 线程&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;k-tile&quot;, &quot;s&quot;: &quot;t_mma 0.2799&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;8 waves&quot;, &quot;s&quot;: &quot;eff 0.970&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pp&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;pingpong&quot;, &quot;s&quot;: &quot;151.6 µs&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;2 stages&quot;, &quot;s&quot;: &quot;216.5 µs&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;ar&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ar&quot;, &quot;b&quot;: &quot;kt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;pp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;s2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="sm"><div class="step-title">1. SMEM</div><p><code>4 × (128 + 128) × 64 × 2 + 8192 + 4 × 16 = 139328</code> 字节 &lt; 232448。按同样的公式，同一个 tile 最多能放 <code>(232448 − 8192) / (32768 + 16) = 6</code> 个 stage；7 个 stage 是 237680 字节，违反 <code>smem</code>。</p>
+</div><div class="step" data-hl="sm,ar"><div class="step-title">2. 寄存器</div><p>cooperative 每个 MMA 线程持有 128·128 / 256 = 64 个 FP32 累加器，加上 40 个其他寄存器 = 104 ≤ 232。256×256 cooperative 要 256 个，违反 <code>acc_regs</code>；256×128 cooperative 正好 128 + 40 = 168，合法，但同一个 tile 换成 pingpong 就是 256，不合法。</p>
+</div><div class="step" data-hl="ar,kt"><div class="step-title">3. 一个 k-tile</div><p><code>t_mma_k = 2·128·128·64 / (989e6 / 132) = 0.2799</code> µs。1024 个 tile、每 wave 132 个，同一个 wave 里只有 <code>ceil(132/32) = 5</code> 个不同的 A panel 和 32 个不同的 B panel，复用系数 <code>(5·128 + 32·128) / (132·256) = 0.140</code>，<code>t_load_k = 0.181</code> µs（每个 CTA 只分到 1/132 的 HBM 带宽）。<code>step = max(0.2799, 0.181, (0.6 + 0.181)/4 = 0.195) = 0.2799</code>：计算受限。</p>
+</div><div class="step" data-hl="kt,s2"><div class="step-title">4. stage 太少</div><p>同一个 tile 只给 2 个 stage：<code>(0.6 + 0.181) / 2 = 0.3905</code>，超过了 <code>t_mma_k</code>，step 变成 0.3905，总时间从 159.9 涨到 216.5 µs。这就是 D2、E1 里看到的“延迟藏不住”。</p>
+</div><div class="step" data-hl="kt,w"><div class="step-title">5. wave 量化</div><p>1024 / 132 = 7.76，要 8 个 wave，效率 1024 / 1056 = 0.970。<code>t_wave = 0.6 + 0.181 + 64·0.2799 + t_epi = 19.99</code> µs，<code>total = 8 × 19.99 = 159.887</code> µs，859.6 TFLOP/s。</p>
+</div><div class="step" data-hl="w,pp"><div class="step-title">6. 换成 pingpong</div><p>每个 SM 同时处理两个 tile，wave 数降到 4，但两个 WG 共用 tensor core：<code>t_wave = max(2·64·0.2799, 64·0.2799) + …</code>，总时间 151.6 µs，比 cooperative 快 5%：多出来的是 epilogue 和 load 尾巴被另一个 WG 的 MMA 藏住了。这和 D3 的结论一致：epilogue 不超过 MMA 的两倍时 pingpong 不慢。</p>
+</div></div></div>
+<p>在整个默认搜索空间（972 个配置，合法 357 个）里，模型的第一名是 <code>64×256×64、pingpong、2 stages</code>（906.7 TFLOP/s，前几名并列，只有 stage 数不同）。常见的 CUTLASS 选择 <code>128×128×64 cooperative 4 stages</code> 排第 43，<code>128×256×64 cooperative</code> 排第 36，<code>64×128×64 pingpong</code> 排第 19。模型认为它们差距不大，排名对这些细节非常敏感：这正是“最后一步要实测”的原因。</p>
+<h2 id="e2-5">易错点</h2>
+<ul>
+<li><strong>cooperative 只要求 BM % 64。</strong> 两个 WG 各 64 行起步，BM 必须是 128 的倍数。测试 <code>test_violations</code> 里 64×128 cooperative 报 <code>wgmma_m</code>、pingpong 合法。</li>
+<li><strong>只返回第一个违反的规则。</strong> 128×128×512 同时违反 <code>tma_box</code> 和 <code>smem</code>，测试要求两个都报、按固定顺序。</li>
+<li><strong>累加器按 tile 总量算，不分 schedule。</strong> pingpong 每个 WG 持有整个 tile，寄存器翻倍。测试 <code>test_smem_and_acc_regs</code>。</li>
+<li><strong>t_load 用整块 HBM 带宽。</strong> 132 个 CTA 同时读，每个 CTA 只分到 1/132（再乘复用系数）。不这样做的话所有配置都被判成计算受限，<code>test_too_few_stages_expose_latency</code> 会失败。</li>
+<li><strong>swizzle 只当合法性检查。</strong> 窄 swizzle 合法但慢（MMA 读 SMEM 有 bank 冲突），不乘系数时 32B swizzle 会和 128B 并列，排序变得没有意义。测试 <code>test_narrow_swizzle_slows_mma</code>。</li>
+<li><strong>排序不稳定。</strong> 很多配置的 total 完全相同（pingpong 在计算受限时与 stage 数无关），只按 total 排序时结果依赖输入顺序。测试 <code>test_search_breaks_ties_by_config_fields</code>。</li>
+</ul>
+<h2 id="e2-6">对照文档</h2>
+<blockquote>
+<p>“不要误解为：CuTe 会自动搜索所有 CTA tile、warp 数、pipeline stage、swizzle 和 scheduler 参数，并保证找到全局最优 kernel。它提供的是可组合的表达、静态推导、合法性检查和代码生成路径；性能搜索通常还需要人工设计搜索空间、autotuning 和实机 profiling。”</p>
+</blockquote>
+<p>本题把这句话拆成三步：<code>violations</code> 是“合法性检查”（C2 的 CUTLASS 层），<code>estimate</code> 是“代价模型”（排除明显差的），<code>search</code> 是“搜索空间”。缺的那一步是实机 profiling：模型里 64×256 pingpong 和 128×128 pingpong 只差 0.01 µs，真实 GPU 上谁快取决于模型没写进去的东西（L2 命中率的细节、指令发射、epilogue 和 TMA store 的争用）。</p>
+<h2 id="e2-7">上机验证</h2>
+<pre><code class="language-bash">DRILL_IMPL=solutions python3 -c &quot;
+from drill import load
+m = load('e2_config_search')
+r = m.search(m.default_space(), m.H100_SXM, 4096, 4096, 4096)
+for c, e in r[:5]: print(c, round(e['total'], 2), round(e['tflops'], 1))&quot;
+</code></pre>
+<p><code>H100_SXM</code> 是示例规格（132 个 SM、每 CTA 最多 232448 字节 SMEM、3.35 TB/s、989 TFLOP/s dense FP16）。真机上可以用 CUTLASS profiler（<code>cutlass_profiler --operation=gemm --m=4096 --n=4096 --k=4096</code>）对同样的候选测时间，看模型的排名和实测差多少（本机没有 GPU，未运行）。RTX 5090 的规格完全不同（170 个 SM、每 SM 128 KB 级的 SMEM、没有 WGMMA），要换一套 <code>GPU(...)</code> 参数和约束才有意义。</p>
+<h2 id="e2-8">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">violations(Config(128, 128, 512, 2), H100_SXM)       # ['tma_box', 'smem']
+violations(Config(256, 256, 64, 2), H100_SXM)        # ['acc_regs']
+e = estimate(Config(128, 128, 64, 4), H100_SXM, 4096, 4096, 4096)
+e[&quot;waves&quot;], round(e[&quot;step&quot;], 4), round(e[&quot;total&quot;], 3)            # (8, 0.2799, 159.887)
+estimate(Config(128, 128, 64, 2), H100_SXM, 4096, 4096, 4096)[&quot;total&quot;]       # 216.502…
+r = search(default_space(), H100_SXM, 4096, 4096, 4096)
+len(default_space()), len(r)                          # (972, 357)
+search(default_space(), H100_SXM, 512, 512, 8192)[0][0]        # 64×64×64, stages=5, pingpong
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>为什么 pingpong 的累加器寄存器是 cooperative 的两倍？这对 tile 大小意味着什么？</li>
+<li>为什么 stage 数在计算受限时“够了就不再有用”？在什么问题形状下会重新变得重要？</li>
+<li>512×512×8192 这种 M、N 小、K 大的问题，为什么模型选小 tile？真实世界里还有什么办法（提示：split-K、stream-K）？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>smem_bytes</code> 和 <code>acc_regs_per_thread</code>：照公式写。</li>
+<li><code>violations</code>：八个 if，按顺序 append。</li>
+<li><code>estimate</code>：先算 tiles、k_tiles、W = min(tiles, sms)、复用系数；再算 <code>t_mma_k</code>、<code>t_load_k</code>、<code>step</code>、<code>t_epi</code>；最后按 schedule 算 waves 和 <code>t_wave</code>。</li>
+<li><code>search</code>：过滤 → 估算 → 按 <code>(total, config)</code> 排序（<code>Config</code> 是 <code>order=True</code> 的 dataclass，可以直接比较）。</li>
+<li><code>default_space</code>：<code>itertools.product</code> 六个维度。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>cooperative 两个 WG 平分一个 tile 的累加器，pingpong 每个 WG 持有一个完整 tile。同样 232 个寄存器的预算，pingpong 的 tile 面积只能是 cooperative 的一半（例如 64×256 或 128×128 对 128×256）。</li>
+<li>stage 只用来藏延迟：只要 <code>(lat + t_load) / stages ≤ max(t_mma, t_load)</code>，再加 stage 只占 SMEM，不缩短 step。延迟相对计算变大时（K 小的 tile、带宽受限的形状、或 TMA 延迟有抖动）它又重要了。</li>
+<li>只有 (512/BM)·(512/BN) 个 tile：大 tile 只能开很少几个 CTA，大部分 SM 空着（wave 效率极低）。小 tile 让 64 个 CTA 同时跑。真实世界还会用 split-K / stream-K 把 K 方向也切开，让更多 SM 参与，最后再归约。</li>
+</ol>
+</div></details></div></details>
+<h2 id="e2-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/e2_config_search.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/e2_config_search.py</span><span class="muted small">177 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;E2 · 选配置：CTA tile、stage 数、warp group 安排与 swizzle，在硬件约束下用代价模型排序 —reference solution.
+
+文档的结论之一：CuTe 不会自动搜索 tile、stage、warp 数和 swizzle；它提供合法性检查和代码生成，性能选择要靠
+设计好的搜索空间 + 代价模型 + 实测。CUTLASS 的 CollectiveBuilder（include/cutlass/gemm/collective/builders/
+sm90_gmma_builder.inl）用 StageCountAutoCarveout 按 shared memory 容量算 stage 数；kernel 的寄存器分配见
+sm90_gemm_tma_warpspecialized_cooperative.hpp 里的 LoadRegisterRequirement = 40 / MmaRegisterRequirement = 232。
+这道题把这些约束和一个简化的代价模型写出来，在小搜索空间里排序，并和常见的 CUTLASS 选择对照。
+
+数据（given）
+- GPU(sms, smem_per_cta, regs_per_sm, hbm_bytes_per_us, tensor_flops_per_us, tma_lat_us)：H100_SXM 是示例规格
+  （132 个 SM、每 CTA 最多 232448 字节 SMEM、每 SM 65536 个寄存器、3.35 TB/s、989 TFLOP/s dense FP16）。
+- Config(BM, BN, BK, stages, schedule, swizzle_bytes)：schedule ∈ {&quot;cooperative&quot;, &quot;pingpong&quot;}；
+  cooperative = 2 个 consumer WG 合作算一个 BM×BN tile（各算 BM/2 行）；pingpong = 2 个consumer WG 各算一个完整的
+  BM×BN tile、轮流做 MMA 和 epilogue。两者都有 1 个 producer WG。swizzle_bytes ∈ {32, 64, 128}。
+- 常量：ELEM_BYTES = 2（FP16/BF16 输入），ACC_BYTES = 4（FP32 累加），LOAD_REGS = 40，MMA_REGS = 232，
+  ACC_REG_OVERHEAD = 40（MMA WG 里除累加器外的寄存器），EPI_SMEM = 8192（epilogue 用的 SMEM），
+  BARRIER_SMEM_PER_STAGE = 16，MAX_BOX = 256（TMA box 每一维最多 256 个元素），
+  SWIZZLE_MMA_FACTOR = {128: 1.0, 64: 1.25, 32: 1.5}（swizzle 越窄，MMA 从 SMEM 读 operand 时 bank 冲突越多，粗略放大 MMA 时间）。
+
+你要实现
+    violations(cfg, gpu) -&gt; list[str]    按下面的顺序检查，返回违反的规则名（都满足时返回[]）：
+        &quot;wgmma_m&quot;     cooperative 时 BM % 128 != 0；pingpong 时 BM % 64 != 0（每个 WG的 wgmma M = 64）
+        &quot;wgmma_n&quot;     BN % 8 != 0 或 BN &gt; 256
+        &quot;swizzle&quot;     BK·ELEM_BYTES 不是 swizzle_bytes 的整数倍（K-major 的 swizzle atom 一行正好是 swizzle_bytes）
+        &quot;tma_box&quot;     BM、BN、BK 中任何一个 &gt; MAX_BOX
+        &quot;smem&quot;        smem_bytes(cfg) &gt; gpu.smem_per_cta
+        &quot;acc_regs&quot;    acc_regs_per_thread(cfg) + ACC_REG_OVERHEAD &gt; MMA_REGS
+        &quot;regs&quot;        (128·LOAD_REGS + 2·128·MMA_REGS) &gt; gpu.regs_per_sm
+        &quot;stages&quot;      stages &lt; 2
+    smem_bytes(cfg) = stages·(BM + BN)·BK·ELEM_BYTES + EPI_SMEM + stages·BARRIER_SMEM_PER_STAGE
+    acc_regs_per_thread(cfg)：累加器是 FP32，每个寄存器 4 字节存 1 个值。
+        cooperative：BM·BN / (2·128)；pingpong：BM·BN / 128（每个 WG 持有整个 tile 的累加器）。
+    estimate(cfg, gpu, M, N, K) -&gt; dict     代价模型（时间单位 µs）：
+        tiles = ceil(M/BM)·ceil(N/BN)；k_tiles = ceil(K/BK)；waves = ceil(tiles / sms)
+        每个 k-tile：t_mma_k = 2·BM·BN·BK / (gpu.tensor_flops_per_us / sms) · SWIZZLE_MMA_FACTOR[swizzle_bytes]
+                    t_load_k = (BM + BN)·BK·ELEM_BYTES / (gpu.hbm_bytes_per_us / sms_active)
+                    其中 sms_active = min(tiles, sms)（同时在跑的 CTA 平分带宽），
+                    再乘 L2 复用系数 reuse（见下）。
+        L2 复用：一个 wave 里同时有 W = min(tiles, sms) 个 tile，按行主序排在 tiles_n = ceil(N/BN) 列的网格上，
+                 distinct_m = ceil(W / tiles_n)，distinct_n = min(W, tiles_n)；
+                 reuse = (distinct_m·BM + distinct_n·BN) / (W·(BM + BN))（只有不同的panel 才需要从 HBM 读）。
+        流水线：step = max(t_mma_k, t_load_k, (gpu.tma_lat_us + t_load_k) / stages)（stage 不够时延迟藏不住）
+        t_epi = BM·BN·ELEM_BYTES / (gpu.hbm_bytes_per_us / sms_active)（写回 C tile）
+        cooperative：waves = ceil(tiles / sms)，t_wave = gpu.tma_lat_us + t_load_k + k_tiles·step + t_epi
+        pingpong：每个 SM 同时处理两个 tile（两个 consumer WG 各一个），waves = ceil(tiles / (2·sms))；两个 WG 的 MMA
+                 共用一个 SM 的 tensor core，不能重叠，但一个 WG 的 epilogue 可以和另一个的 MMA 重叠：
+                 t_wave = max(2·k_tiles·t_mma_k, k_tiles·step) + gpu.tma_lat_us + t_load_k + t_epi
+        total = waves·t_wave；tflops = 2·M·N·K / total / 1e6（单位 TFLOP/s：FLOP / µs / 1e6）
+        返回 {&quot;tiles&quot;, &quot;waves&quot;, &quot;wave_eff&quot;: tiles / (waves·sms·(2 if pingpong else1)), &quot;step&quot;, &quot;t_wave&quot;, &quot;total&quot;, &quot;tflops&quot;}。
+    search(space, gpu, M, N, K) -&gt; list[(Config, estimate dict)]
+        过滤掉 violations 非空的配置，按 total 升序排序；total 相同时按 (BM, BN, BK, stages, schedule, swizzle_bytes) 升序。
+    default_space() -&gt; list[Config]
+        BM ∈ {64, 128, 256}，BN ∈ {64, 128, 256}，BK ∈ {32, 64, 128}，stages ∈ {2,3, 4, 5, 6, 7}，
+        schedule ∈ {&quot;cooperative&quot;, &quot;pingpong&quot;}，swizzle_bytes ∈ {32, 64, 128}，全组合。
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import itertools
+import math
+from dataclasses import dataclass
+ELEM_BYTES = 2
+ACC_BYTES = 4
+LOAD_REGS = 40
+MMA_REGS = 232
+ACC_REG_OVERHEAD = 40
+EPI_SMEM = 8192
+BARRIER_SMEM_PER_STAGE = 16
+MAX_BOX = 256
+SWIZZLE_MMA_FACTOR = {128: 1.0, 64: 1.25, 32: 1.5}   # 窄 swizzle 让 MMA 读 SMEM 时有 bank 冲突（见 D2 的 wavefront 表）
+
+
+@dataclass(frozen=True)
+class GPU:
+    sms: int
+    smem_per_cta: int
+    regs_per_sm: int
+    hbm_bytes_per_us: float
+    tensor_flops_per_us: float
+    tma_lat_us: float
+
+
+H100_SXM = GPU(sms=132, smem_per_cta=232448, regs_per_sm=65536,
+               hbm_bytes_per_us=3.35e6, tensor_flops_per_us=989e6, tma_lat_us=0.6)
+
+
+@dataclass(frozen=True, order=True)
+class Config:
+    BM: int
+    BN: int
+    BK: int
+    stages: int
+    schedule: str = &quot;cooperative&quot;
+    swizzle_bytes: int = 128
+
+
+def smem_bytes(cfg: Config) -&gt; int:
+    &quot;&quot;&quot;multi-stage A/B ring + epilogue + 每个 stage 两个 mbarrier。&quot;&quot;&quot;
+    return cfg.stages * (cfg.BM + cfg.BN) * cfg.BK * ELEM_BYTES + EPI_SMEM + cfg.stages * BARRIER_SMEM_PER_STAGE
+
+
+def acc_regs_per_thread(cfg: Config) -&gt; int:
+    &quot;&quot;&quot;每个 MMA 线程为 FP32 累加器占用的寄存器数。&quot;&quot;&quot;
+    # cooperative：两个 WG（256 线程）分摊一个 tile；pingpong：一个 WG（128 线程）持有整个tile
+    threads = 2 * 128 if cfg.schedule == &quot;cooperative&quot; else 128
+    return cfg.BM * cfg.BN // threads
+
+
+def violations(cfg: Config, gpu: GPU) -&gt; list:
+    &quot;&quot;&quot;按 docstring 的顺序返回违反的规则。&quot;&quot;&quot;
+    out = []
+    if cfg.BM % (128 if cfg.schedule == &quot;cooperative&quot; else 64):
+        out.append(&quot;wgmma_m&quot;)
+    if cfg.BN % 8 or cfg.BN &gt; 256:
+        out.append(&quot;wgmma_n&quot;)
+    if (cfg.BK * ELEM_BYTES) % cfg.swizzle_bytes:
+        out.append(&quot;swizzle&quot;)
+    if max(cfg.BM, cfg.BN, cfg.BK) &gt; MAX_BOX:
+        out.append(&quot;tma_box&quot;)
+    if smem_bytes(cfg) &gt; gpu.smem_per_cta:
+        out.append(&quot;smem&quot;)
+    if acc_regs_per_thread(cfg) + ACC_REG_OVERHEAD &gt; MMA_REGS:
+        out.append(&quot;acc_regs&quot;)
+    if 128 * LOAD_REGS + 2 * 128 * MMA_REGS &gt; gpu.regs_per_sm:
+        out.append(&quot;regs&quot;)
+    if cfg.stages &lt; 2:
+        out.append(&quot;stages&quot;)
+    return out
+
+
+def estimate(cfg: Config, gpu: GPU, M: int, N: int, K: int) -&gt; dict:
+    &quot;&quot;&quot;见模块 docstring 的代价模型。&quot;&quot;&quot;
+    tiles_m, tiles_n = math.ceil(M / cfg.BM), math.ceil(N / cfg.BN)
+    tiles = tiles_m * tiles_n
+    k_tiles = math.ceil(K / cfg.BK)
+    pp = cfg.schedule == &quot;pingpong&quot;
+    W = min(tiles, gpu.sms)
+    sms_active = W
+    distinct_m = math.ceil(W / tiles_n)
+    distinct_n = min(W, tiles_n)
+    reuse = (distinct_m * cfg.BM + distinct_n * cfg.BN) / (W * (cfg.BM + cfg.BN))
+    bw = gpu.hbm_bytes_per_us / sms_active
+    t_mma_k = 2 * cfg.BM * cfg.BN * cfg.BK / (gpu.tensor_flops_per_us / gpu.sms) *SWIZZLE_MMA_FACTOR[cfg.swizzle_bytes]
+    t_load_k = (cfg.BM + cfg.BN) * cfg.BK * ELEM_BYTES / bw * reuse
+    # 延迟 + 一个 stage 的传输要被 stages 个 buffer 分摊；不够时 step 被它主导
+    step = max(t_mma_k, t_load_k, (gpu.tma_lat_us + t_load_k) / cfg.stages)
+    t_epi = cfg.BM * cfg.BN * ELEM_BYTES / bw
+    if pp:
+        waves = math.ceil(tiles / (2 * gpu.sms))
+        t_wave = max(2 * k_tiles * t_mma_k, k_tiles * step) + gpu.tma_lat_us + t_load_k + t_epi
+    else:
+        waves = math.ceil(tiles / gpu.sms)
+        t_wave = gpu.tma_lat_us + t_load_k + k_tiles * step + t_epi
+    total = waves * t_wave
+    return {
+        &quot;tiles&quot;: tiles,
+        &quot;waves&quot;: waves,
+        &quot;wave_eff&quot;: tiles / (waves * gpu.sms * (2 if pp else 1)),
+        &quot;step&quot;: step,
+        &quot;t_wave&quot;: t_wave,
+        &quot;total&quot;: total,
+        &quot;tflops&quot;: 2 * M * N * K / total / 1e6,
+    }
+
+
+def search(space, gpu: GPU, M: int, N: int, K: int) -&gt; list:
+    &quot;&quot;&quot;合法配置按 total 升序（并列按配置字段升序）。&quot;&quot;&quot;
+    out = [(c, estimate(c, gpu, M, N, K)) for c in space if not violations(c, gpu)]
+    out.sort(key=lambda ce: (ce[1][&quot;total&quot;], ce[0]))
+    return out
+
+
+def default_space() -&gt; list:
+    &quot;&quot;&quot;全组合搜索空间。&quot;&quot;&quot;
+    return [Config(bm, bn, bk, st, sch, sw)
+            for bm, bn, bk, st, sch, sw in itertools.product(
+                [64, 128, 256], [64, 128, 256], [32, 64, 128], [2, 3, 4, 5, 6, 7],
+                [&quot;cooperative&quot;, &quot;pingpong&quot;], [32, 64, 128])]</code></pre></div></div></details>
+<h2 id="e2-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>CUTLASS 的 <code>StageCountAutoCarveout</code> 怎样从 SMEM 容量算出 stage 数（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl">sm90_gmma_builder.inl</a>）？它和本题的 <code>smem_bytes</code> 有什么不同？</li>
+<li>本模型没有 cluster：2×1 的 cluster 加 TMA multicast 能把 A 或 B 的 HBM 读取减半。把它加进模型，排名会怎样变？</li>
+<li>L2 复用系数假设 tile 按行主序发射。CUTLASS 的 tile scheduler 有 swizzle（raster order）选项：它改变的是哪一项？</li>
+<li>如果要做一个 autotuner：先用 C2 的 <code>check_config</code> 和本题的 <code>violations</code> 过滤，再用 <code>estimate</code> 取前 N 个去实测。N 取多少合适？依据是什么？</li>
+</ul>
+
+<nav class="pager"><a href="e1_full_gemm.html">← 上一题 E1</a><span></span></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#e2-1">题面速览</a>
+<a class="o2" href="#e2-2">直觉与类比</a>
+<a class="o2" href="#e2-3">图解：一个配置的生死与快慢</a>
+<a class="o2" href="#e2-4">逐步演示</a>
+<a class="o2" href="#e2-5">易错点</a>
+<a class="o2" href="#e2-6">对照文档</a>
+<a class="o2" href="#e2-7">上机验证</a>
+<a class="o2" href="#e2-8">三级提示</a>
+<a class="o2" href="#e2-9">参考解</a>
+<a class="o2" href="#e2-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

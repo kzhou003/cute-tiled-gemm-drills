@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D1 · TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3 cur" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">D1 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 55 分钟 · 中</div><h1>D1 · TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</h1><p class="lede">把 TMA 加进 GEMM 的第一步：生产者不再让 128 个线程各算地址，而是由一个线程发一条带“张量描述符”的指令，硬件把整块 box 搬进 shared memory。本题复刻 CuTe 建描述符时检查的硬件限制，算出 mbarrier 要等的字节数，模拟越界填零，并和真实 CuTe 的 GMMA swizzle atom 在真实 smem 指针上逐个地址对拍。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d1_tma_box.py"><code>mine/d1_tma_box.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d1_tma_box.py"><code>tests/test_d1_tma_box.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d1_tma_box.py"><code>solutions/d1_tma_box.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D1"> 我已完成这道题</label></header>
+<h2 id="d1-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：先读 <a href="../knowledge/time_dimension.html">时间维度</a> 的 TMA 一节；swizzle 的位运算在 A3 已经做过。</li>
+<li><strong>在体系里的位置</strong>：CuTe 的 <code>make_tma_copy</code> 最终调用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L929">make_tma_copy_desc</a>：从 gmem tensor 的 layout 推出维度、字节 stride、box，用一串 <code>assert</code> 检查硬件限制，再调用驱动的 <code>cuTensorMapEncodeTiled</code>。swizzle 模式由 smem atom 决定（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma_swizzle.hpp#L48">get_tma_swizzle_bits</a>），atom 本身定义在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm90_gmma.hpp#L104">mma_traits_sm90_gmma.hpp</a>。</li>
+<li><strong>你要实现</strong>：<code>validate</code>、<code>elements_per_dim</code>、<code>expect_tx_bytes</code>、<code>swizzle_byte</code>、<code>smem_byte_offset</code>、<code>box_load</code>、<code>unswizzle</code>、<code>tile_element_map</code>。<code>SWIZZLE_B</code>、<code>SWIZZLE_SPAN</code>、<code>TmaDesc</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>所有元组<strong>最内层在前</strong>；<code>gstrides</code> 是维度 1 起的<strong>字节</strong> stride，维度 0 的 stride 隐含为一个元素。</li>
+<li>十条合法性规则按固定顺序检查、全部报告；维数对不上时只报 <code>E_RANK</code>。</li>
+<li><code>expect_tx_bytes = Π ceil(box[i] / elem_strides[i]) × elem_bytes</code>，越界填零的部分也算。</li>
+<li>swizzle 作用在 SMEM <strong>字节地址</strong>上：<code>Swizzle&lt;B,4,3&gt;</code>，B = 1/2/3 对应 32B/64B/128B。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：合法描述符 · 每条规则各自触发 · swizzle 跨度规则 · 维数错误只报一条 · 多条错误同时报告 · expect_tx（1024、8192、越界仍 8192、带 element stride 的 352 和 4096）· 三种字节 swizzle 的单点值、自逆、16 字节块不拆、不出 128 字节行 · 三种 box 的元素位置与真实 CuTe 的 GMMA atom（<code>tile_to_shape</code> 后放在 smem 指针上）逐个相同 · box 往返、越界填零、负起点、element stride、非法描述符报错。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>TMA</strong>（Tensor Memory Accelerator）：Hopper（SM90）起的张量搬运单元。一个线程发 <code>cp.async.bulk.tensor</code>，硬件按描述符搬一整块。</li>
+<li><strong>描述符</strong>（<code>CUtensorMap</code>）：128 字节的对象，记录全局 tensor 的基址、各维长度、字节 stride、box 大小、element stride、swizzle 模式。由主机端的驱动 API 编码，kernel 里只读。</li>
+<li><strong>box</strong>：一次 TMA 搬运的矩形子块。<strong>element stride</strong>：box 内每隔几个元素取一个。</li>
+<li><strong>mbarrier</strong>：shared memory 里的异步屏障。TMA 搬完后在它上面“交付”字节数；消费者等它。D2 专门讲。<strong>expect_tx</strong>：生产者预先告诉 mbarrier“这一轮要来多少字节”。</li>
+<li><strong>GMMA / WGMMA</strong>（warp-group 级矩阵乘指令）：直接从 SMEM 读操作数，所以 SMEM 的 swizzle 必须是它认得的几种。</li>
+</ul>
+</div>
+<h2 id="d1-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 仓库发货单</div><p>以前取货（线程协作 copy）是 128 个人每人拿一张小纸条去货架找自己那几件；TMA 是只写一张“发货单”（描述符 + 起点坐标）交给叉车。发货单有格式要求：货架编号要对齐、每层间距要是 16 的倍数、一次最多 256 件（这些就是 <code>validate</code> 的十条规则）。叉车按单子把整托货送到你的库位，并在门口的签收板（mbarrier）上记“到了 8192 字节”；单子上写的范围超出货架的部分，叉车放空箱（填零），但空箱也算进字节数。库位里货怎么摆（swizzle），是事先约定的固定花样，叉车和取货的人（WGMMA）都按同一个花样来。</p>
+</div>
+<h2 id="d1-3">图解：一次 box load 的数据路径</h2>
+
+<figure class="flow"><div class="flow-head">从描述符到 SMEM<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;从描述符到 SMEM&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;TmaDesc&quot;, &quot;s&quot;: &quot;gdims · gstrides · box&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;v&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;validate&quot;, &quot;s&quot;: &quot;十条硬件规则&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;box 坐标 c&quot;, &quot;s&quot;: &quot;g = start + c·estride&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;o&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;越界？&quot;, &quot;s&quot;: &quot;是 → 写 0&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;swizzle_byte&quot;, &quot;s&quot;: &quot;Sw&lt;B,4,3&gt; on bytes&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;m&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;SMEM + mbarrier&quot;, &quot;s&quot;: &quot;tx += expect_tx&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;v&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;o&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;o&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;v&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;m&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 220.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>合法性只看描述符，与起点无关；越界判断只看起点和 gdims；SMEM 位置只看 box 内坐标和 swizzle。三件事互相独立，测试也分开检查。</figcaption></figure>
+<h2 id="d1-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ B_TILE = TmaDesc(2, (64, 256), (128,), (64, 64), swizzle=&quot;128B&quot;)</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;ok&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;合法性&quot;, &quot;s&quot;: &quot;inner = 128 B&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tx&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;expect_tx&quot;, &quot;s&quot;: &quot;64·64·2 = 8192&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;row&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;行 r 的第 0 块&quot;, &quot;s&quot;: &quot;128r ^ 16(r%8)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cu&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;真实 CuTe&quot;, &quot;s&quot;: &quot;4096/4096 一致&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;ok&quot;, &quot;b&quot;: &quot;tx&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tx&quot;, &quot;b&quot;: &quot;row&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;row&quot;, &quot;b&quot;: &quot;cu&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="ok"><div class="step-title">1. 合法性</div><p>inner box = 64 × 2 = 128 字节：是 16 的倍数（<code>E_INNER_16B</code> 通过），且不超过 128B swizzle 的跨度（<code>E_SWIZZLE_SPAN</code> 通过）。行 pitch 128 字节是 16 的倍数。<code>validate(B_TILE) == []</code>。同一个 box 换成 <code>&quot;64B&quot;</code> 就只报一条：<code>E_SWIZZLE_SPAN: inner box 128 bytes &gt; 64B swizzle span</code>。</p>
+</div><div class="step" data-hl="ok,tx"><div class="step-title">2. 字节数</div><p><code>expect_tx_bytes(B_TILE) = 8192</code>。A 的 16×32 half box 是 1024。如果 M 方向 element stride 取 3，box 32 行只取 <code>ceil(32/3) = 11</code> 行：<code>elements_per_dim = (16, 11)</code>，352 字节。生产者在 <code>arrive_and_expect_tx</code> 里报的就是这个数，报错了 mbarrier 永远等不到（D2）。</p>
+</div><div class="step" data-hl="tx,row"><div class="step-title">3. 每一行搬到哪</div><p>box 坐标 (k=0, m=r) 的线性字节偏移是 128r，swizzle 后：<code>[0, 144, 288, 432, 576, 720, 864, 1008]</code>。也就是第 r 行的第 0 个 16 字节块被放到第 r % 8 块上。换成元素偏移就是 <code>[0, 72, 144, 216, …]</code>，正是元素域的 <code>Swizzle&lt;3,3,3&gt;</code>。<span class="cells"><span class="cell on">0</span><span class="cell ">1</span><span class="cell ">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span> <span class="cells"><span class="cell ">0</span><span class="cell on">1</span><span class="cell ">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span> <span class="cells"><span class="cell ">0</span><span class="cell ">1</span><span class="cell on">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span></p>
+</div><div class="step" data-hl="row,cu"><div class="step-title">4. 和真实 CuTe 对拍</div><p>把真实的 <code>GMMA::Layout_K_SW128_Atom&lt;half_t&gt;</code> 用 <code>tile_to_shape</code> 铺成 64×64，放到一个 smem 指针上，读 <code>&amp;t(m,k) − base</code>：4096 个元素全部等于 <code>tile_element_map(64, 64, 2, &quot;128B&quot;)</code>。32B、64B 两种 atom 也一样（<code>test_tile_element_map_matches_gmma_swizzle_atoms</code>）。</p>
+</div></div></div>
+<h2 id="d1-5">易错点</h2>
+<ul>
+<li><strong>把 atom 打印出来的 <code>Sw&lt;3,4,3&gt;</code> 当成元素域的 swizzle。</strong> <code>Sw&lt;3,4,3&gt; o smem_ptr[16b](unset) o (_8,_64):(_64,_1)</code> 里的 swizzle 作用在指针的字节地址上（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/pointer_swizzle.hpp#L80">apply_swizzle</a> 对 <code>uintptr_t</code> 做异或）。直接对 layout 求整数值会得到第 1 行不动（64），真实地址是 72。测试 <code>test_tile_element_map_matches_gmma_swizzle_atoms</code>。</li>
+<li><strong>gstrides 写成元素数。</strong> TMA 的 stride 是字节；40 个 half 一行要写 80。测试 <code>test_box_load_fills_out_of_bounds_with_zero</code> 用的就是 80 字节的 pitch。</li>
+<li><strong>越界的元素不算字节。</strong> 硬件照样把填零的字节交付给 mbarrier；少报会让 tx 永远不归零。测试 <code>test_expect_tx_counts_every_box_element</code>。</li>
+<li><strong>负起点当作错误。</strong> box 起点可以是负数（卷积的 halo 常见），越出的部分填零。测试里 <code>start = (-8, -4)</code>。</li>
+<li><strong>swizzle 跨度只看 box 总大小。</strong> 规则看的是最内层一行的字节数（<code>box[0] × elem_bytes</code>），不是整个 box。</li>
+<li><strong>维数错时继续检查。</strong> 长度对不上时后面的逐维检查会越界；和 CuTe 一样先报 <code>E_RANK</code> 就返回。</li>
+</ul>
+<h2 id="d1-6">对照文档</h2>
+<blockquote>
+<p>“TMA（Tensor Memory Accelerator）允许由指定线程/warp 发起描述符驱动的多维数据搬运，由硬件执行大块 tensor transfer。Layout 仍然重要：描述 tensor 的形状、stride、shared-memory 排布以及 swizzle 等……所以 TMA 并没有让 Layout 失去意义；它改变的是‘执行搬运的机制’，而不是‘数据坐标和物理排布’这件事。”</p>
+</blockquote>
+<p>本题就是这句话的具体内容：描述符里的每个字段都来自 gmem layout，SMEM 排布来自 smem atom；<code>box_load</code> 之后用 <code>unswizzle</code> 还原出的逻辑 tile 和 numpy 切片完全相同，变的只是“谁来搬”。</p>
+<h2 id="d1-7">真实代码</h2>
+<p>CuTe 建描述符时检查的硬件限制（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L929">make_tma_copy_desc</a>）：</p>
+<pre><code class="language-cpp">assert((reinterpret_cast&lt;uint64_t&gt;(gmem_address) &amp; 0b1111) == 0);   // Address must be 16B-aligned
+assert(gmem_prob_shape[i] &gt;= 1 &amp;&amp; gmem_prob_shape[i] &lt;= (uint64_t(1) &lt;&lt; 32));
+assert(gmem_prob_stride[0] == 1 &amp;&amp; &quot;Majorness of smem doesn't match majorness of gmem&quot;);
+assert((gmem_prob_stride[i]) &lt; (uint64_t(1) &lt;&lt; 40));               // Stride must be max 2^40
+assert((gmem_prob_stride[i] &amp; 0b1111) == 0);                         // Stride must be multiple of 16B
+assert(smem_box_shape[i] &gt;= 1 &amp;&amp; smem_box_shape[i] &lt;= (uint32_t(1) &lt;&lt; 8));   // max 256
+assert(smem_box_stride[i] &gt;= 1 &amp;&amp; smem_box_stride[i] &lt;= 8);
+</code></pre>
+<p><code>E_INNER_16B</code> 和 <code>E_SWIZZLE_SPAN</code> 不在这段 assert 里：它们是 CUDA 驱动文档对 <code>cuTensorMapEncodeTiled</code> 的要求，违反时由驱动返回错误。atom 到 TMA 模式的映射在 <code>get_tma_swizzle_bits</code>：M == 4（16 字节块）时 B = 0/1/2/3 分别是 DISABLE / B32 / B64 / B128。</p>
+<h2 id="d1-8">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/d1_tma_box.cpp            # 真实 CuTe 的 GMMA atom 放在真实 smem 指针上
+./check.sh oracle d1                                   # 重新生成 tests/golden/d1_tma_box.json
+</code></pre>
+<p>本机的真实输出：</p>
+<pre><code class="language-text">K_SW128 half atom : Sw&lt;3,4,3&gt; o smem_ptr[16b](unset) o (_8,_64):(_64,_1)
+physical element offset of (m, k) for k = 0, 8, ..., 56:
+ m=0:     0     8    16    24    32    40    48    56
+ m=1:    72    64    88    80   104    96   120   112
+ m=2:   144   152   128   136   176   184   160   168
+ m=7:   504   496   488   480   472   464   456   448
+element-domain Swizzle&lt;3,3,3&gt; agrees on 4096 of 4096 elements
+</code></pre>
+<p>每一行的 8 个 16 字节块被异或 m % 8 重新排列：8 行里同一列 k 的块各落在不同位置，WGMMA 和 TMA 都没有 bank conflict。TMA 描述符本身要驱动编码，CPU 上验证不了；有 Hopper（SM90）或更新的 GPU 时，可以用 CUTLASS 的 TMA 例子把 gdims 改成不对齐的值，看 <code>cuTensorMapEncodeTiled</code> 的返回码（本机没有 GPU，未核对）。</p>
+<h2 id="d1-9">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">A = TmaDesc(2, (64, 64), (128,), (16, 32), swizzle=&quot;32B&quot;)
+validate(A)                                   # []
+validate(TmaDesc(2, (64, 64), (100,), (16, 512), swizzle=&quot;32B&quot;, base_addr=4))
+# ['E_ALIGN: ...', 'E_GSTRIDE_ALIGN: ...', 'E_BOX: box[1]=512 not in [1, 256]']
+expect_tx_bytes(A)                            # 1024
+elements_per_dim(TmaDesc(2, (64, 64), (128,), (16, 32), elem_strides=(1, 3)))   # (16, 11)
+[swizzle_byte(o, &quot;128B&quot;) for o in (0, 16, 128, 144, 256, 1152)]   # [0, 16, 144, 128, 288, 1168]
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li><code>Swizzle&lt;3,4,3&gt;</code> 在字节地址上读哪几位、写哪几位？为什么它永远不会把一个 16 字节块拆开，也不会把数据移出 128 字节行？</li>
+<li>越界填零的字节为什么也要算进 expect_tx？</li>
+<li>元素域里 half / bf16 的 128B swizzle 为什么是 <code>Swizzle&lt;3,3,3&gt;</code>，而 fp32 是什么？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>validate</code>：先比较四个元组的长度和 rank 范围，不对就直接返回 <code>[E_RANK]</code>；然后按规则表顺序逐条 append。</li>
+<li><code>swizzle_byte</code>：<code>yyy = ((1&lt;&lt;B)−1) &lt;&lt; 7</code>，返回 <code>off ^ ((off &amp; yyy) &gt;&gt; 3)</code>；B = 0 原样返回。</li>
+<li><code>smem_byte_offset</code>：box 坐标按 colex（最内层最快）线性化，乘 <code>elem_bytes</code>，再 swizzle。</li>
+<li><code>box_load</code>：先 <code>validate</code>，非法抛 ValueError；<code>np.zeros(expect_tx_bytes)</code>；枚举每个 box 坐标，算全局坐标，越界跳过（已经是 0），否则按字节地址 <code>Σ g[i]·stride_b[i]</code>（<code>stride_b[0] = elem_bytes</code>）拷 <code>elem_bytes</code> 个字节。</li>
+<li><code>unswizzle</code>：swizzle 是自逆的，所以“从 SMEM 读回逻辑元素 i”也用 <code>swizzle_byte(i·eb)</code>。</li>
+<li><code>tile_element_map</code>：<code>out[m + rows·k] = swizzle_byte((m·inner + k)·eb) // eb</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>读第 7、8、9 位（第几个 128 字节行的低 3 位），异或到第 4、5、6 位（行内第几个 16 字节块）。低 4 位（块内字节）和第 7 位以上都不变，所以块不拆、行不换。</li>
+<li>硬件对整块 box 写 SMEM，越界部分写的是 0，同样是一次写入，同样计入 transaction。mbarrier 的 phase 要等 tx 归零才完成；少报会提前完成（读到没写完的数据），多报会永远等不到。</li>
+<li>元素偏移 e 的字节地址是 2e，<code>Sw&lt;3,4,3&gt;(2e) / 2</code> 等于把位 [6,9) 异或进位 [3,6)，即 <code>Swizzle&lt;3,3,3&gt;</code>。fp32 是 4 字节，同理得 <code>Swizzle&lt;3,2,3&gt;</code>。</li>
+</ol>
+</div></details></div></details>
+<h2 id="d1-10">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/d1_tma_box.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d1_tma_box.py</span><span class="muted small">188 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D1 · TMA box：描述符的合法性、expect_tx 字节数、越界填零与 swizzle 后的 SMEM 位置 — reference solution.
+
+TMA（Tensor Memory Accelerator，Hopper 起的张量搬运硬件）不再让每个线程算地址：一个线程发一条
+`cp.async.bulk.tensor` 指令，带上一个“张量描述符”（CUtensorMap）和 box 的起点坐标，硬件就把整块 box
+搬进 shared memory，并按描述符里的 swizzle 模式打散地址。CuTe 在
+include/cute/atom/copy_traits_sm90_tma.hpp 的 make_tma_copy_desc 里从 Tensor 的 layout 推出描述符的
+维度、字节 stride、box 和 swizzle，并用一串 assert 检查硬件限制；本题复刻这套规则和它的数据效果。
+
+记号
+- 所有元组都是“最内层维度在前”（和 CUtensorMap、CuTe 的 TMA 基一致）：gdims=(K, M) 表示 K 连续。
+- gdims：每一维的元素个数；gstrides：维度 1.. 的**字节** stride（维度 0 的 stride 隐含为 elem_bytes）。
+- box：每一维搬多少个元素；elem_strides：每一维每隔几个元素取一个（默认全 1）。
+- swizzle：&quot;none&quot; / &quot;32B&quot; / &quot;64B&quot; / &quot;128B&quot;。在字节地址上就是 CuTe 的 Swizzle&lt;B,4,3&gt;，B= 0/1/2/3：
+  把“第几个 128 字节行”的低 B 位异或进“行内第几个 16 字节块”。
+
+规则（validate 按这个顺序检查，返回所有违反项，每条以错误码开头）
+  E_RANK          1 &lt;= rank &lt;= 5，且 gdims / gstrides / box / elem_strides 的长度一致
+  E_ALIGN         base_addr % 16 == 0
+  E_GDIM          1 &lt;= gdims[i] &lt;= 2**32
+  E_GSTRIDE_ALIGN gstrides[j] % 16 == 0
+  E_GSTRIDE_MAX   gstrides[j] &lt; 2**40
+  E_BOX           1 &lt;= box[i] &lt;= 256
+  E_ESTRIDE       1 &lt;= elem_strides[i] &lt;= 8
+  E_INNER_16B     box[0] * elem_bytes % 16 == 0（非 interleave 模式的要求）
+  E_SWIZZLE_MODE  swizzle 必须是四种之一
+  E_SWIZZLE_SPAN  swizzle != &quot;none&quot; 时 box[0] * elem_bytes &lt;= 32 / 64 / 128
+
+数据效果
+- elements_per_dim[i] = ceil(box[i] / elem_strides[i])；SMEM 里是一块稠密 box，最内层连续。
+- expect_tx_bytes = prod(elements_per_dim) * elem_bytes：越界部分也算（硬件填 0，照样计入 transaction 字节）。
+  这正是生产者在 mbarrier 上 arrive_and_expect_tx 时要报的字节数（D2）。
+- box 元素 c（最内层在前）对应全局坐标 g[i] = start[i] + c[i] * elem_strides[i]；任一维 g[i] &lt; 0 或 &gt;= gdims[i]
+  就是越界，写 0。全局字节地址 = g[0]*elem_bytes + Σ_{i&gt;=1} g[i]*gstrides[i-1]。
+- SMEM 字节位置 = swizzle_byte(线性字节偏移, swizzle)，线性字节偏移 = elem_bytes * colex(c, elements_per_dim)。
+
+API
+    SWIZZLE_B / SWIZZLE_SPAN / TmaDesc                given
+    validate(desc) -&gt; list[str]
+    elements_per_dim(desc) -&gt; tuple
+    expect_tx_bytes(desc) -&gt; int
+    swizzle_byte(off, mode) -&gt; int                     Swizzle&lt;B,4,3&gt; on byte offsets
+    smem_byte_offset(desc, box_coord) -&gt; int
+    box_load(gmem: np.ndarray[uint8], desc, start) -&gt; np.ndarray[uint8]   长度 expect_tx_bytes
+    unswizzle(desc, smem, dtype) -&gt; np.ndarray         把 SMEM 还原成逻辑 box，shape= 反过来的 elements_per_dim
+    tile_element_map(rows, inner, elem_bytes, mode) -&gt; list[int]
+                                                        (rows, inner) 的二维 box（inner 连续）按 CuTe colex 顺序
+                                                        (m + rows*k) 列出元素偏移，用来和 CuTe 的 tile_to_shape 对拍
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+
+SWIZZLE_B = {&quot;none&quot;: 0, &quot;32B&quot;: 1, &quot;64B&quot;: 2, &quot;128B&quot;: 3}
+SWIZZLE_SPAN = {&quot;none&quot;: 0, &quot;32B&quot;: 32, &quot;64B&quot;: 64, &quot;128B&quot;: 128}
+
+
+@dataclass(frozen=True)
+class TmaDesc:
+    &quot;&quot;&quot;一个简化的 CUtensorMap：最内层维度在前。elem_strides 缺省为全 1。&quot;&quot;&quot;
+    elem_bytes: int
+    gdims: tuple
+    gstrides: tuple          # bytes, for dims 1..rank-1
+    box: tuple
+    elem_strides: tuple | None = None
+    swizzle: str = &quot;none&quot;
+    base_addr: int = 0
+
+    def estrides(self) -&gt; tuple:
+        return self.elem_strides if self.elem_strides is not None else (1,) * len(self.gdims)
+
+
+def validate(desc: TmaDesc) -&gt; list[str]:
+    &quot;&quot;&quot;返回所有违反的规则（错误码开头的字符串），合法时返回空列表。&quot;&quot;&quot;
+    errs: list[str] = []
+    r = len(desc.gdims)
+    es = desc.estrides()
+    # 和 make_tma_copy_desc 一样：先看维数，长度对不上就别往下查了（后面会越界）。
+    if not (1 &lt;= r &lt;= 5) or len(desc.gstrides) != r - 1 or len(desc.box) != r or len(es) != r:
+        return [f&quot;E_RANK: rank {r} must be 1..5 and gstrides/box/elem_strides must match&quot;]
+    if desc.base_addr % 16:
+        errs.append(f&quot;E_ALIGN: base address {desc.base_addr} is not 16-byte aligned&quot;)
+    for i, d in enumerate(desc.gdims):
+        if not (1 &lt;= d &lt;= 2 ** 32):
+            errs.append(f&quot;E_GDIM: gdims[{i}]={d} not in [1, 2^32]&quot;)
+    for j, s in enumerate(desc.gstrides):
+        # 字节 stride 必须是 16 的倍数：TMA 以 16 字节为最小搬运粒度寻址每一行。
+        if s % 16:
+            errs.append(f&quot;E_GSTRIDE_ALIGN: gstrides[{j}]={s} bytes is not a multiple of 16&quot;)
+        if s &gt;= 2 ** 40:
+            errs.append(f&quot;E_GSTRIDE_MAX: gstrides[{j}]={s} &gt;= 2^40&quot;)
+    for i, b in enumerate(desc.box):
+        if not (1 &lt;= b &lt;= 256):
+            errs.append(f&quot;E_BOX: box[{i}]={b} not in [1, 256]&quot;)
+    for i, e in enumerate(es):
+        if not (1 &lt;= e &lt;= 8):
+            errs.append(f&quot;E_ESTRIDE: elem_strides[{i}]={e} not in [1, 8]&quot;)
+    inner = desc.box[0] * desc.elem_bytes
+    if inner % 16:
+        errs.append(f&quot;E_INNER_16B: inner box is {inner} bytes, not a multiple of 16&quot;)
+    if desc.swizzle not in SWIZZLE_B:
+        errs.append(f&quot;E_SWIZZLE_MODE: unknown swizzle {desc.swizzle!r}&quot;)
+    elif desc.swizzle != &quot;none&quot; and inner &gt; SWIZZLE_SPAN[desc.swizzle]:
+        # swizzle 的“行”是 128 字节线，块是 16 字节；一行 box 超过 swizzle 的跨度，异或就会把数据甩出行外。
+        errs.append(f&quot;E_SWIZZLE_SPAN: inner box {inner} bytes &gt; {desc.swizzle} swizzle span&quot;)
+    return errs
+
+
+def elements_per_dim(desc: TmaDesc) -&gt; tuple:
+    &quot;&quot;&quot;每一维实际搬运的元素个数：ceil(box / elem_stride)。&quot;&quot;&quot;
+    return tuple(-(-b // e) for b, e in zip(desc.box, desc.estrides()))
+
+
+def expect_tx_bytes(desc: TmaDesc) -&gt; int:
+    &quot;&quot;&quot;一次 box load 交付到 SMEM 的字节数（越界填 0 的部分也算）。&quot;&quot;&quot;
+    return math.prod(elements_per_dim(desc)) * desc.elem_bytes
+
+
+def swizzle_byte(off: int, mode: str) -&gt; int:
+    &quot;&quot;&quot;CuTe Swizzle&lt;B,4,3&gt; 作用在字节偏移上：bits[7, 7+B) 异或进 bits[4, 4+B)。&quot;&quot;&quot;
+    B = SWIZZLE_B[mode]
+    if B == 0:
+        return off
+    # 与 cute::Swizzle&lt;B,M,S&gt; 一样：yyy 掩码在 [M+S, M+S+B)，右移 S 位后异或到 [M, M+B)。
+    M, S = 4, 3
+    yyy = ((1 &lt;&lt; B) - 1) &lt;&lt; (M + S)
+    return off ^ ((off &amp; yyy) &gt;&gt; S)
+
+
+def _colex(coord, shape) -&gt; int:
+    idx, mul = 0, 1
+    for c, n in zip(coord, shape):
+        idx += c * mul
+        mul *= n
+    return idx
+
+
+def smem_byte_offset(desc: TmaDesc, box_coord) -&gt; int:
+    &quot;&quot;&quot;box 内坐标（最内层在前）对应的 SMEM 字节位置（已 swizzle）。&quot;&quot;&quot;
+    lin = _colex(box_coord, elements_per_dim(desc)) * desc.elem_bytes
+    return swizzle_byte(lin, desc.swizzle)
+
+
+def box_load(gmem: np.ndarray, desc: TmaDesc, start) -&gt; np.ndarray:
+    &quot;&quot;&quot;模拟一次 TMA box load：返回 expect_tx_bytes 长的 SMEM 字节数组。gmem 是 uint8 字节缓冲区。&quot;&quot;&quot;
+    errs = validate(desc)
+    if errs:
+        raise ValueError(&quot;; &quot;.join(errs))
+    epd = elements_per_dim(desc)
+    es = desc.estrides()
+    eb = desc.elem_bytes
+    smem = np.zeros(expect_tx_bytes(desc), dtype=np.uint8)
+    strides_b = (eb,) + tuple(desc.gstrides)
+    for flat in range(math.prod(epd)):
+        # colex 枚举 box 坐标
+        c, rem = [], flat
+        for n in epd:
+            c.append(rem % n)
+            rem //= n
+        g = [s + ci * e for s, ci, e in zip(start, c, es)]
+        dst = smem_byte_offset(desc, c)
+        if any(gi &lt; 0 or gi &gt;= d for gi, d in zip(g, desc.gdims)):
+            continue                       # 越界：硬件写 0（smem 初始化就是 0），但字节照样计入 tx
+        src = sum(gi * sb for gi, sb in zip(g, strides_b))
+        smem[dst:dst + eb] = gmem[src:src + eb]
+    return smem
+
+
+def unswizzle(desc: TmaDesc, smem: np.ndarray, dtype) -&gt; np.ndarray:
+    &quot;&quot;&quot;把 SMEM 字节按 swizzle 还原成逻辑 box（numpy shape 为最外层在前）。&quot;&quot;&quot;
+    epd = elements_per_dim(desc)
+    eb = desc.elem_bytes
+    out = np.zeros(math.prod(epd) * eb, dtype=np.uint8)
+    for flat in range(math.prod(epd)):
+        src = swizzle_byte(flat * eb, desc.swizzle)   # swizzle 是对合（自己的逆），双向都用它
+        out[flat * eb:(flat + 1) * eb] = smem[src:src + eb]
+    return out.view(dtype).reshape(tuple(reversed(epd)))
+
+
+def tile_element_map(rows: int, inner: int, elem_bytes: int, mode: str) -&gt; list[int]:
+    &quot;&quot;&quot;(rows, inner) 的 box，inner 连续：按 CuTe colex 顺序 (m + rows*k) 列出每个元素在SMEM 的元素偏移。&quot;&quot;&quot;
+    out = [0] * (rows * inner)
+    for k in range(inner):
+        for m in range(rows):
+            out[m + rows * k] = swizzle_byte((m * inner + k) * elem_bytes, mode) // elem_bytes
+    return out</code></pre></div></div></details>
+<h2 id="d1-11">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><code>make_tma_copy</code> 怎样从一个任意的 gmem layout 和 smem layout 找出 TMA 的“基”（哪几维连续、box 怎么切）？对照同一文件里的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L735">construct_tma_gbasis</a>。</li>
+<li>multicast：一个 cluster 里多个 CTA 要同一块 A，怎样只读一次 gmem？box 为什么要能被 multicast 数整除？</li>
+<li>为什么 TMA 要求 stride 是 16 字节的倍数，而线程协作 copy 没有这个要求？如果矩阵的行长度是 100 个 half，该怎么办？</li>
+<li>Ping-pong kernel 的 epilogue 用 TMA store 写回 C：store 方向的 swizzle 和越界规则有什么不同？</li>
+</ul>
+
+<nav class="pager"><a href="c2_compile_checks.html">← 上一题 C2</a><a href="d2_mbarrier_pipeline.html">D2 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#d1-1">题面速览</a>
+<a class="o2" href="#d1-2">直觉与类比</a>
+<a class="o2" href="#d1-3">图解：一次 box load 的数据路径</a>
+<a class="o2" href="#d1-4">逐步演示</a>
+<a class="o2" href="#d1-5">易错点</a>
+<a class="o2" href="#d1-6">对照文档</a>
+<a class="o2" href="#d1-7">真实代码</a>
+<a class="o2" href="#d1-8">上机验证</a>
+<a class="o2" href="#d1-9">三级提示</a>
+<a class="o2" href="#d1-10">参考解</a>
+<a class="o2" href="#d1-11">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

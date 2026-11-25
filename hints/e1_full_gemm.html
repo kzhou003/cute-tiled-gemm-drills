@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E1 · 完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3 cur" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">E1 · Track E · 完整成熟的 Tiled GEMM · 75 分钟 · 难</div><h1>E1 · 完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</h1><p class="lede">这是 capstone：把 TMA box、SW128 swizzle 的 SMEM 环形缓冲、mbarrier 的 full / empty 两组 barrier、producer / consumer warp group 分工、epilogue 和 PDL 接成一个 Hopper 风格的 GEMM。离散事件模拟器会抓住每一次数据竞争和死锁；结果要和 A @ B.T 逐元素相等，时间线要能看到搬运和计算的重叠。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/e1_full_gemm.py"><code>mine/e1_full_gemm.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_e1_full_gemm.py"><code>tests/test_e1_full_gemm.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/e1_full_gemm.py"><code>solutions/e1_full_gemm.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="E1"> 我已完成这道题</label></header>
+<h2 id="e1-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/time_dimension.html">时间维度</a> 的 TMA、pipeline、warp specialization 三节，以及 <a href="../knowledge/real_code.html">真实代码导读</a>。</li>
+<li><strong>在体系里的位置</strong>：结构对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp">sm90_gemm_tma_warpspecialized_cooperative.hpp</a>（1 个 producer warp group + 2 个 consumer warp group）；流水线状态对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L171">PipelineState</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L272">make_producer_start_state</a>；主循环对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L310">collective 的 load</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L417">mma</a>；最小的 TMA + mbarrier 主循环见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/hopper/wgmma_tma_sm90.cu">wgmma_tma_sm90.cu</a>。</li>
+<li><strong>你要实现</strong>：<code>PipelineState</code>（<code>advance</code>、<code>producer_start</code>、<code>consumer_start</code>）、<code>tma_box_load</code>、<code>producer</code>、<code>consumer</code>、<code>run_gemm</code>、<code>chain</code>。<code>Barrier</code>、<code>Sim</code>、<code>sw128</code>、<code>smem_read</code>、<code>Ctx</code>、区间工具和所有时间常量已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li><code>PipelineState.advance</code>：index 加 1，绕回 0 时翻转 phase；stages == 1 时只翻 phase。producer 从 phase 1 开始，consumer 从 phase 0 开始。</li>
+<li>producer 每个 k-tile：等 <code>empty[s]</code> → <code>arrive_expect_tx(full[s], A+B 字节)</code> → TMA A → TMA B → advance。</li>
+<li>consumer 每个 k-tile：等 <code>full[s]</code> → MMA（读 stage s）→ <code>arrive(empty[s])</code> → advance。<code>empty</code> 每个 phase 要 2 次 arrival（两个 consumer WG 都放手才能复用）。</li>
+<li>TMA box 总是整块搬：越界元素填 0，字节数按整个 box 算。</li>
+<li>PDL 的后继：先只发 B（权重）的 TMA，<code>grid_wait</code> 之后再补发 A（前驱的输出）；trigger 在最后一个 k-tile 的 MMA 之后、epilogue 之前。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：given 的 <code>sw128</code> 等于真实 CuTe 的 GMMA SW128 atom · <code>PipelineState</code> 的序列与真实 CUTLASS 相同、单 stage 只翻 phase、两种起始状态 · TMA box 的 swizzle 位置与 OOB 填零、整块计字节 · producer 的 op 序列（第四个 k-tile 等 phase 0）· PDL producer 在 <code>grid_wait</code> 前只发 B、声明 A+B 字节 · consumer 的 op 序列和只有 WG 0 trigger · 五种形状和 stage 数的结果都等于 <code>A @ B.T</code>（含边界 tile）· 时间报告（18.3 / 10.6、重叠 4.1、trigger 9.6）· stage 越多越不慢 · 起始时间平移 · PDL 预取权重的收益 · 两个 GEMM 串联有无 PDL 的结果与 spans。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>TMA</strong>：Hopper 的拷贝引擎。一个线程用描述符发起一次多维 box 拷贝，硬件把 global memory 的一个矩形块搬进 SMEM，越界部分填零。</li>
+<li><strong>mbarrier</strong>：SMEM 里的异步 barrier。每个 phase 需要固定次数的 arrival，外加 expect_tx 声明的字节全部到达（TMA 落地时 <code>complete_tx</code>）。<code>try_wait.parity(P)</code> 在“已完成的 phase 数的奇偶 ≠ P”时通过。</li>
+<li><strong>full / empty barrier</strong>：<code>full[s]</code> 表示 stage s 的数据已经到了（producer → consumer），<code>empty[s]</code> 表示 stage s 已经用完可以覆盖（consumer → producer）。</li>
+<li><strong>SW128</strong>：128 字节宽的 swizzle。对 16-bit 元素是 <code>o ^ ((o &gt;&gt; 3) &amp; 0x38)</code>，把行号的低 3 位异或进 16 字节块号，让 8 行同一列落在不同 bank。</li>
+</ul>
+</div>
+<h2 id="e1-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 一个厨房的出菜口</div><p>出菜口有 stages 个格子。配菜员（producer WG）看到格子空了（empty）就去仓库拿料（TMA），先在格子上挂一张“还差 A、B 两包料”的单子（expect_tx），料到齐单子自动撕掉（full 完成）。两个厨师（consumer WG）看到格子满了就各自做自己那一半（BM/2 行），做完各拍一下格子上的铃（arrive empty），两声铃响格子才算空。格子上贴着一张“第几轮”的奇偶标签（phase）：同一个格子第 n 轮和第 n+1 轮的标签不同，所以没人会把上一轮的状态当成这一轮。配菜员开工时格子都是空的，所以他从“上一轮已经空了”的标签（phase 1）开始等，立刻通过。</p>
+</div>
+<h2 id="e1-3">图解：一个 CTA 里的三个 agent 和两组 barrier</h2>
+
+<figure class="flow"><div class="flow-head">warp-specialized cooperative GEMM（stages = s）<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;warp-specialized cooperative GEMM（stages = s）&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;producer WG&quot;, &quot;s&quot;: &quot;empty → expect → TMA&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ring&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;SMEM ring&quot;, &quot;s&quot;: &quot;s 个 stage · SW128&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;consumer WG 0&quot;, &quot;s&quot;: &quot;行 0..63 · MMA · trigger&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c1&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer WG 1&quot;, &quot;s&quot;: &quot;行 64..127 · MMA&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;epi&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;epilogue&quot;, &quot;s&quot;: &quot;acc → C（裁边）&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;ring&quot;, &quot;t&quot;: &quot;full[s]&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: true, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ring&quot;, &quot;b&quot;: &quot;c0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ring&quot;, &quot;b&quot;: &quot;c1&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c0&quot;, &quot;b&quot;: &quot;epi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c1&quot;, &quot;b&quot;: &quot;epi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c1:b&quot;, &quot;b&quot;: &quot;p:b&quot;, &quot;t&quot;: &quot;empty[s] × 2&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 270.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>不变量：producer 写 stage s 之前 <code>empty[s]</code> 一定完成过（两个 WG 都读完了），consumer 读 stage s 之前 <code>full[s]</code> 一定完成过（两个 box 都落地了）。Sim 的 RAW / WAR 检查就是在验证这两句话。</figcaption></figure>
+<h2 id="e1-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 128×128×512，stages = 3：8 个 k-tile 怎样在 3 个 stage 里流动</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;su&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;setup&quot;, &quot;s&quot;: &quot;0.5 µs&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;t3&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA k0..k2&quot;, &quot;s&quot;: &quot;0.5–3.5&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;m0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;MMA k0&quot;, &quot;s&quot;: &quot;2.0–2.6&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;empty[0] 完成&quot;, &quot;s&quot;: &quot;2.6&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;k3&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA k3&quot;, &quot;s&quot;: &quot;等 empty[0]&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;稳态&quot;, &quot;s&quot;: &quot;每 1 µs 一个 tile&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;end&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;trigger · epi&quot;, &quot;s&quot;: &quot;9.6 · 10.6&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;su&quot;, &quot;b&quot;: &quot;t3&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t3&quot;, &quot;b&quot;: &quot;m0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;m0&quot;, &quot;b&quot;: &quot;e0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;e0:r&quot;, &quot;b&quot;: &quot;k3:b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;k3&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;st&quot;, &quot;b&quot;: &quot;end&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="su,t3"><div class="step-title">1. setup 与前三个 stage</div><p>三个 agent 都先花 0.5 µs 做 setup。producer 的 <code>PipelineState.producer_start(3)</code> 是 (index 0, phase 1)：三个 <code>empty[s]</code> 都还没完成过 phase，<code>try_wait(1)</code> 立刻通过，所以它连续填满 3 个 stage。每个 stage 两个 16 KB 的 box，TMA 引擎每个传 0.5 µs：区间是 0.5–1.0、1.0–1.5 …… 3.0–3.5。</p>
+</div><div class="step" data-hl="t3,m0"><div class="step-title">2. 第一个 MMA</div><p>stage 0 的 B box 在 1.5 传完，再过 0.5 µs 落地：<code>full[0]</code> 在 2.0 完成。两个 consumer 的 <code>consumer_start</code> 是 phase 0，<code>try_wait(0)</code> 在 2.0 通过，并行做 0.6 µs 的 MMA（2.0–2.6），各自只读 A 的一半行。</p>
+</div><div class="step" data-hl="m0,e0"><div class="step-title">3. 释放 stage 0</div><p>两个 consumer 在 2.6 各 arrive 一次，<code>empty[0]</code> 的第一个 phase 完成（需要 2 次）。这正是 empty 每个 phase 需要 <code>NUM_CONSUMERS</code> 次 arrival 的原因：只等一个 WG 就复用，另一个 WG 还在读的数据会被 TMA 覆盖（Sim 会报 WAR）。</p>
+</div><div class="step" data-hl="e0,k3"><div class="step-title">4. 第四个 k-tile 复用 stage 0</div><p>producer 在第 4 个 k-tile 回到 index 0，phase 已经翻成 0：<code>try_wait(0)</code> 要求 <code>empty[0]</code> 完成过奇数次，2.6 之后成立。TMA k3 在 3.5–4.5 传输（引擎是串行的，而且前面已经排到 3.5）。如果 producer 不翻 phase，它会在 stage 0 上永远等不到，Sim 报 <code>Deadlock</code>。</p>
+</div><div class="step" data-hl="k3,st"><div class="step-title">5. 稳态：搬运是瓶颈</div><p>每个 stage 要 1.0 µs 的 TMA，MMA 只要 0.6 µs：TMA 一直在忙（<code>tma_busy = 8.0</code>），MMA 每 1 µs 做一次（2.0、3.0 …… 9.0，<code>mma_busy = 4.8</code>）。MMA 和 TMA 的重叠 <code>overlap = 4.1</code> µs。</p>
+</div><div class="step" data-hl="st,end"><div class="step-title">6. trigger 和 epilogue</div><p>最后一个 MMA 在 9.6 结束，WG 0 在这里 trigger（<code>report[&quot;trigger&quot;] = 9.6</code>），然后两个 WG 各做 1.0 µs 的 epilogue，CTA 在 10.6 结束。对比 stages = 1：每个 k-tile 都要 1.5 µs（传输 + 延迟）+ 0.6 µs MMA，完全串行，结束在 18.3，<code>overlap = 0</code>。stages = 2 是 10.9，3 和 4 都是 10.6：再多 stage 也快不过 TMA 带宽。</p>
+</div></div></div>
+<h2 id="e1-5">易错点</h2>
+<ul>
+<li><strong>producer 从 phase 0 开始。</strong> empty barrier 一开始没完成过任何 phase，<code>try_wait(0)</code> 不通过，三个 agent 全部卡住。测试 <code>test_pipeline_start_states</code>；完整运行时 Sim 报 <code>Deadlock</code>。</li>
+<li><strong>empty 只要 1 次 arrival。</strong> 第一个 WG 做完就放行 producer，第二个 WG 还在读的 stage 被覆盖。<code>run_gemm</code> 的构造要求是 <code>Barrier(NUM_CONSUMERS)</code>；Sim 的 WAR 检查会抓住。</li>
+<li><strong>producer 跳过 empty wait。</strong> TMA 写进一个还没被读完的 stage：Sim 报 <code>RaceError</code>（所有 stages 的正确性用例都会失败）。</li>
+<li><strong>expect_tx 只声明 A 的字节。</strong> full 在 A 落地时就完成，consumer 读 B 时 B 还没到：Sim 报 <code>RAW on stage …</code>。PDL 路径里也一样：先发 B、后发 A，但声明的必须是 A+B。测试 <code>test_producer_pdl_prefetches_weights_before_grid_wait</code>。</li>
+<li><strong>越界部分不搬或少计字节。</strong> TMA 的 box 是整块：边界 tile 里越界行必须是 0（否则累加了上一个 tile 的残留），字节数必须是整块，否则 tx 计数永远不归零。测试 <code>test_tma_box_load_swizzles_and_zero_fills</code>、<code>test_run_gemm_is_correct[MNK2-2]</code>。</li>
+<li><strong>trigger 放在 epilogue 之后或者两个 WG 都 trigger。</strong> 测试 <code>test_consumer_op_sequence_and_single_trigger</code> 要求只有 WG 0、在最后一个 k-tile 之后、epilogue 之前。</li>
+<li><strong>PDL 后继在 grid_wait 之前读了 A。</strong> A 是前驱的输出 H。测试检查 <code>grid_wait</code> 之前的 TMA 只有 B。</li>
+</ul>
+<h2 id="e1-6">对照文档</h2>
+<blockquote>
+<p>“多 stage pipeline 会用多个 shared-memory buffer：计算当前 stage 时，producer 预取后续 stage；consumer 在确认数据 ready 后再消费；stage 被用完后才能释放并复用。……例如一个 warp group 负责 TMA load（producer），其他 warp group 负责 MMA（consumer）。……这里增加的不只是新的 Layout：还需要角色分配、pipeline 状态、barrier、warp-group 同步以及架构特定的指令语义。”</p>
+</blockquote>
+<p>文档伪代码和本题、CUTLASS 的对应关系：</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>文档伪代码</th>
+<th>本题</th>
+<th>CUTLASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gA_tile = local_tile(gA, tile_MK, cta_coord)</code></td>
+<td><code>run_gemm</code> 里的 <code>m0, n0</code> 和 <code>tma_box_load(src, r0, c0, …)</code></td>
+<td><code>local_tile(mA_mkl, …)</code> + <code>tma_partition</code></td>
+</tr>
+<tr>
+<td><code>sA = make_tensor(smem, swizzled_layout_A)</code></td>
+<td><code>smemA</code> + <code>sw128</code></td>
+<td><code>GMMA::Layout_K_SW128_Atom&lt;half_t&gt;</code> + <code>tile_to_shape</code></td>
+</tr>
+<tr>
+<td><code>issue_load / wait_until_ready / release</code></td>
+<td>producer / consumer 的 wait、expect、tma、arrive</td>
+<td><code>producer_acquire</code> / <code>consumer_wait</code> / <code>consumer_release</code></td>
+</tr>
+<tr>
+<td><code>gemm(tiled_mma, …)</code></td>
+<td>consumer 里 <code>acc[wg] += A_part · B_partᵀ</code></td>
+<td><code>cute::gemm</code> + <code>warpgroup_arrive/commit/wait</code></td>
+</tr>
+<tr>
+<td><code>store(gC_tile, accumulator)</code></td>
+<td>最后一个 <code>compute(EPI_US, …)</code></td>
+<td><code>collective_epilogue.store</code></td>
+</tr>
+<tr>
+<td>后继 kernel 的 PDL</td>
+<td><code>chain(..., pdl=True)</code></td>
+<td><code>launch_dependent_grids</code> / <code>wait_on_dependent_grids</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="e1-7">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/e1_full_gemm.cpp      # 真实 CuTe，本机编译运行
+</code></pre>
+<p>本机的真实输出：</p>
+<pre><code class="language-text">SW128 atom  : Sw&lt;3,4,3&gt; o smem_ptr[16b](unset) o (_8,_64):(_64,_1)
+sA (128x64) : Sw&lt;3,4,3&gt; o smem_ptr[16b](unset) o ((_8,_16),(_64,_1)):((_64,_512),(_1,_0))
+offset(0,8) = 8 offset(1,0) = 72 offset(1,8) = 64 offset(7,0) = 504 offset(8,0) = 512
+sw128(m*64+k) vs real CuTe offset: 0 mismatches of 8192
+stage bytes (A 128x64 + B 128x64, half) = 32768
+</code></pre>
+<p>两点值得注意。第一，CuTe 打印的是 <code>Sw&lt;3,4,3&gt;</code>，不是本题的 <code>Swizzle&lt;3,3,3&gt;</code>：真实的 swizzle 挂在 smem_ptr 上、作用在字节地址上（16 字节块 = 低 4 位），换算成 16-bit 元素偏移正好是 <code>o ^ ((o &gt;&gt; 3) &amp; 0x38)</code>。只看 layout 的整数值会得到没 swizzle 的 64，必须通过真实指针算偏移才是 72，8192 个位置和给定的 <code>sw128</code> 全部一致。第二，一个 stage 的字节数 32768 就是 producer 传给 <code>arrive_and_expect_tx</code> 的数（<code>TmaTransactionBytes</code>）。</p>
+<p>这个 GEMM 的真实版本需要 Hopper（SM90）的 WGMMA 和 TMA。RTX 5090（SM120）有 TMA 和 mbarrier，但没有 WGMMA，CUTLASS 在它上面用另一套 kernel；本题的协议（stage、phase、full / empty、warp specialization、PDL）在那里同样适用。</p>
+<h2 id="e1-8">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">st = PipelineState.producer_start(3)
+# 连续 advance 7 次看到的 (index, phase)：
+# [(0, 1), (1, 1), (2, 1), (0, 0), (1, 0), (2, 0), (0, 1)]
+A = np.random.default_rng(1).standard_normal((128, 512)); B = ...       # 同形
+C, r = run_gemm(A, B, Cfg(128, 128, 512, stages=1))
+r   # {'end': 18.3, 'trigger': 17.3, 'tma_busy': 8.0, 'mma_busy': 4.8, 'overlap': 0.0}
+C, r = run_gemm(A, B, Cfg(128, 128, 512, stages=3))
+r   # {'end': 10.6, 'trigger': 9.6, 'tma_busy': 8.0, 'mma_busy': 4.8, 'overlap': 4.1}
+chain(X, W1, W2, Cfg(128, 256, 256), Cfg(128, 128, 256), False)[1]   # [(0.0, 6.6), (9.6, 16.2)]
+chain(X, W1, W2, Cfg(128, 256, 256), Cfg(128, 128, 256), True)[1]    # [(0.0, 6.6), (6.1, 13.0)]
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>producer 为什么从 phase 1 开始？如果从 0 开始会发生什么？</li>
+<li><code>empty[s]</code> 每个 phase 为什么要 2 次 arrival？<code>full[s]</code> 为什么只要 1 次？</li>
+<li>为什么“声明字节”和“arrive”要合成一个 <code>arrive_expect_tx</code>？如果先 arrive 再单独 expect_tx 会怎样？</li>
+<li>PDL 路径里，为什么预取窗口是 <code>min(stages, k_tiles)</code> 个 stage？能不能把所有 k-tile 的 B 都在 <code>grid_wait</code> 之前发出去？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>PipelineState</code>：照着 CUTLASS 的 <code>operator++</code> 写，三个字段，两个 classmethod。</li>
+<li><code>tma_box_load</code>：用 <code>np.arange</code> 做行、列索引，<code>inb = (r0+r &lt; R) &amp; (c0+c &lt; C)</code>；先建全 0 的 vals，把在界内的元素填进去，再一次性写到 <code>smem[base + sw128(r*cols + c)]</code>。返回 <code>rows*cols*ELEM_BYTES</code>。</li>
+<li>写一个小工具，给定 (stage, k-tile, &quot;A&quot; 或 &quot;B&quot;) 返回一个闭包：调用时执行对应的 <code>tma_box_load</code>。stage 的基址是 <code>s*BM*BK</code>（A）或 <code>s*BN*BK</code>（B）。</li>
+<li><code>producer</code>：先 yield setup，然后用 <code>producer_start</code>。PDL 时先做一个预取循环（wait empty → expect A+B → 只发 B → advance），<code>yield (&quot;grid_wait&quot;,)</code> 之后用一个新的 <code>producer_start</code> 状态补发这些 stage 的 A，再从第 <code>min(stages, k_tiles)</code> 个 k-tile 开始正常循环。</li>
+<li><code>consumer</code>：每个 k-tile 的 fn 用 <code>smem_read</code> 读出 A 的本 WG 行和整块 B，<code>acc[wg] += a @ b.T</code>；最后 WG 0 trigger，再 epilogue 写回（<code>C[m0+r, n0:n0+cols] = acc[...]</code>，裁掉越界部分）。</li>
+<li><code>run_gemm</code>：每个 CTA 一个 Ctx 和一个 Sim；report 的 busy / overlap 用 CTA 0 的区间算。</li>
+<li><code>chain</code>：第一个 GEMM 正常跑；第二个按 pdl 与否算 start 和 grid_ready。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>一开始所有 stage 都是空的，producer 要等的是“上一轮已经被吃完”，而 empty barrier 还没完成过任何 phase：完成数 0 是偶数，<code>try_wait(1)</code> 立刻通过。从 0 开始，<code>try_wait(0)</code> 要等第一个 phase 完成，可 consumer 还在等 full，三方互等：死锁。</li>
+<li>两个 consumer WG 都读同一个 stage（各读自己那一半 A、整块 B），只有两个都读完才能覆盖，所以 empty 每轮要 2 次 arrival。full 的“到达”由 producer 一次 <code>arrive_expect_tx</code> 加上 TMA 的字节完成，所以 1 次 arrival 就够。</li>
+<li>分开写时，arrive 之后、expect_tx 之前的那一瞬间，barrier 看到“arrival 到齐、tx = 0”，phase 立刻完成，consumer 会在数据还没到时通过 wait。合成一条保证“声明字节”先于“到达”生效。</li>
+<li>每个 stage 只能装一个 k-tile 的数据；预取第 <code>stages+1</code> 个 k-tile 的 B 需要先复用 stage 0，而复用要等 consumer 读完 stage 0，consumer 读 stage 0 又要等 A，A 要等 <code>grid_wait</code>：所以 grid_wait 之前最多预取 <code>min(stages, k_tiles)</code> 个 stage。</li>
+</ol>
+</div></details></div></details>
+<h2 id="e1-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/e1_full_gemm.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/e1_full_gemm.py</span><span class="muted small">465 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;E1 · 完整成熟的 Tiled GEMM：TMA box → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → MMA → epilogue → PDL 串联 — reference solution.
+
+这是 capstone：把前面所有部件接成一个 Hopper 风格的 warp-specialized GEMM，功能上逐元素正确，时间上能看到
+搬运与计算的重叠，最后用 PDL 串联第二个 GEMM。结构对照 CUTLASS 的
+include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp（1 个 producer warp group 发 TMA，
+2 个 consumer warp group 做 MMA）、include/cutlass/pipeline/sm90_pipeline.hpp（PipelineTmaAsync、PipelineState）
+和 examples/cute/tutorial/hopper/wgmma_tma_sm90.cu（mbarrier + TMA 的最小主循环）。
+
+问题：C[M,N] = A[M,K] · B[N,K]ᵀ（A、B 都是 K 连续，即文档里的 “A × Bᵀ”）。每个 CTA 算一个 BM×BN 的 C tile，
+沿 K 每次取 BK=64（一个 k-tile）。两个 consumer warp group 合作：WG w 负责 tile 的第 [w·BM/2, (w+1)·BM/2) 行。
+数值用 float64 模拟（half 的字节数只用来算时间和 TMA 字节数：ELEM_BYTES = 2）。
+
+given（不需要你写）
+- Cfg(M, N, K, BM=128, BN=128, BK=64, stages=4)，以及时间常量 TMA_LAT_US、TMA_BYTES_PER_US、MMA_US、EPI_US、SETUP_US、
+  STREAM_GAP_US、PDL_LAUNCH_US、FLUSH_US。
+- sw128(offset)：16-bit 元素的 SW128 swizzle（CuTe Swizzle&lt;3,3,3&gt;，作用在元素偏移上）：o^ ((o &gt;&gt; 3) &amp; 0x38)。
+  一个 stage 的 A tile（BM×BK，K-major，BK = 64）里元素 (m, k) 放在 smem[stage_base + sw128(m·BK + k)]；B 同理（BN×BK）。
+- smem_read(smem, base, rows, cols)：按同样的 swizzle 读出逻辑 tile（consumer 的视角）。
+- Barrier：mbarrier 模型。init 时给出每个 phase 需要的 arrival 数；arrive(t)、expect_tx(bytes, t)、complete_tx(bytes, t)；
+  phase 在“arrival 到齐且 tx 字节清零”时完成，完成时刻是参与事件时间的最大值。
+  try_wait(parity, t) 与 PTX mbarrier.try_wait.parity 相同：截至时刻 t 已完成的 phase数为 c，c % 2 != parity 时通过。
+- Sim：离散事件模拟器。每个 agent 是一个 generator，yield 下面的操作：
+    (&quot;wait&quot;, bar, parity)                 阻塞直到 bar.try_wait(parity) 通过
+    (&quot;arrive&quot;, bar)                       到达一次
+    (&quot;arrive_expect_tx&quot;, bar, nbytes)     到达一次并声明本 phase 还要等 nbytes 的 TMA字节
+    (&quot;tma&quot;, bar, nbytes, fn, stage)       发起 TMA：引擎串行传输 nbytes/TMA_BYTES_PER_US，传完再过 TMA_LAT_US 落地；
+                                          落地时对 bar 做 complete_tx(nbytes)；fn()在发起时立刻执行（做数据搬运）
+    (&quot;compute&quot;, us, fn, stage)            占用 us 微秒后执行 fn()（stage 是读的 smem stage，不读写时为 None）
+    (&quot;grid_wait&quot;,)                        griddepcontrol.wait：等到 sim.grid_ready（前驱 kernel 结束 + FLUSH）
+    (&quot;trigger&quot;,)                          launch_dependents：记录 sim.trigger_time（只影响后继的启动时间）
+  Sim 检查数据竞争：TMA 写某个 stage 的区间和对它的读区间重叠 → RaceError(&quot;WAR …&quot;)；读一个stage 时它最近一次写还没
+  落地 → RaceError(&quot;RAW …&quot;)；所有 agent 都阻塞 → Deadlock。run() 返回每个 agent 的结束时间，并记录 tma / mma 忙区间。
+
+你要实现
+    PipelineState(stages, index=0, phase=0, count=0)
+        .advance()                         index+1；回到 0 时 phase ^= 1；count+1（与CUTLASS PipelineState::operator++ 相同，stages == 1 时只翻 phase）
+        PipelineState.producer_start(stages) -&gt; PipelineState(stages, 0, 1, 0)   生产者从相反的 phase 开始，因为 buffer 一开始都是空的
+        PipelineState.consumer_start(stages) -&gt; PipelineState(stages, 0, 0, 0)
+    tma_box_load(src, r0, c0, rows, cols, smem, base) -&gt; int
+        把 src[r0:r0+rows, c0:c0+cols] 按 sw128 写到 smem[base + …]；越界（r ≥ src 行数或 c ≥ 列数）的元素写 0（TMA 的
+        OOB 填零）。返回传输的字节数 rows·cols·ELEM_BYTES（越界部分也计入，TMA box 总是整块）。
+    producer(ctx)  generator：先 (&quot;compute&quot;, SETUP_US, None, None)；
+        对每个 k-tile：等 empty[s]（producer 的 phase）→ arrive_expect_tx(full[s], A和 B 两个 box 的字节和)
+        → 两个 tma（先 A box 再 B box，stage 参数都传 s）→ state.advance()。
+        ctx.pdl_wait 为 True 时（被 PDL 提前启动的后继 kernel）：前 min(stages, k_tiles)个 stage 先只发 B（权重，独立
+        operand）的 TMA（expect_tx 仍然按 A+B 的总字节声明），然后 (&quot;grid_wait&quot;,)，再补发这些 stage 的 A，之后正常循环
+        （对应 CUTLASS example 63：在 griddepcontrol.wait 之前预取权重）。
+    consumer(ctx, wg)  generator：先 (&quot;compute&quot;, SETUP_US, None, None)；对每个 k-tile：等 full[s]（consumer 的 phase）→
+        (&quot;compute&quot;, MMA_US, fn, s)，fn 把 smem 里本 WG 负责的 A 行和整块 B 读出来，acc[wg] += A_part · B_partᵀ
+        → arrive(empty[s]) → advance。最后一个 k-tile 之后：wg == 0 时 yield (&quot;trigger&quot;,)（CUTLASS 在最后一个 tile 的
+        mma_tail 之后调用 launch_dependent_grids），然后 (&quot;compute&quot;, EPI_US, fn, None)把 acc 写回 C（裁掉越界部分）。
+    run_gemm(A, B, cfg, start=0.0, grid_ready=0.0, pdl_wait=False) -&gt; (C, report)
+        对每个 CTA（tile_m 外层、tile_n 内层）建 smem、full/empty 两组 Barrier（full 每phase 1 个 arrival，
+        empty 每 phase 2 个 arrival = consumer WG 数）、一个 Sim（起始时间 start、grid_ready），跑 producer + 2 个 consumer。
+        假设每个 CTA 独占一个 SM、同时运行。report = {&quot;end&quot;: 所有 CTA 结束时间的最大值, &quot;trigger&quot;: 所有 CTA trigger
+        时间的最大值, &quot;tma_busy&quot;: CTA 0 的 TMA 忙时间, &quot;mma_busy&quot;: CTA 0 的 MMA 忙时间（两个 WG 的区间取并集）,
+        &quot;overlap&quot;: CTA 0 里 MMA 忙区间与 TMA 忙区间交集的长度}。
+    chain(X, W1, W2, cfg1, cfg2, pdl) -&gt; (Y, spans)
+        H = X·W1ᵀ，Y = H·W2ᵀ（第二个 GEMM 的 A 是 H，B 是 W2）。不用 PDL：第二个 kernel start = end1 + STREAM_GAP_US，
+        grid_ready = start（不需要等）。用 PDL：start = trigger1 + PDL_LAUNCH_US，grid_ready = end1 + FLUSH_US，
+        pdl_wait=True。spans = [(0, end1), (start2, end2)]。
+&quot;&quot;&quot;
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+ELEM_BYTES = 2            # half：只用于字节数与时间
+TMA_LAT_US = 0.5          # TMA 传完到数据落地 / barrier 完成的延迟
+TMA_BYTES_PER_US = 32768  # 每个 SM 的 TMA 传输速度：一个 128×64 + 128×64 的 stage（32KB）需要 1 µs
+MMA_US = 0.6              # 一个 consumer WG 做完一个 k-tile 的 MMA（两个 WG 并行）
+EPI_US = 1.0              # epilogue：写回 C tile
+SETUP_US = 0.5            # kernel 开始时的初始化（barrier init、算地址）
+STREAM_GAP_US = 3.0       # 普通 stream：前一个 kernel 结束到下一个开始
+PDL_LAUNCH_US = 0.5       # launch_dependents 之后到后继 kernel 开始
+FLUSH_US = 0.5            # 前驱结束到 griddepcontrol.wait 返回
+NUM_CONSUMERS = 2
+
+
+@dataclass(frozen=True)
+class Cfg:
+    M: int
+    N: int
+    K: int
+    BM: int = 128
+    BN: int = 128
+    BK: int = 64
+    stages: int = 4
+
+
+def sw128(o):
+    &quot;&quot;&quot;CuTe Swizzle&lt;3,3,3&gt; 作用在 16-bit 元素偏移上（SW128）：把行号的低 3 位异或进 16 字节块号。&quot;&quot;&quot;
+    return o ^ ((o &gt;&gt; 3) &amp; 0x38)
+
+
+def smem_read(smem, base, rows, cols):
+    &quot;&quot;&quot;读出 smem 里一个 rows×cols（K-major，cols == 64）的逻辑 tile。&quot;&quot;&quot;
+    r = np.arange(rows)[:, None]
+    c = np.arange(cols)[None, :]
+    return smem[base + sw128(r * cols + c)]
+
+
+class RaceError(RuntimeError):
+    pass
+
+
+class Deadlock(RuntimeError):
+    pass
+
+
+class Barrier:
+    &quot;&quot;&quot;mbarrier 模型：每个 phase 需要 count 次 arrival，且 expect_tx 声明的字节全部 complete_tx。&quot;&quot;&quot;
+
+    def __init__(self, count: int):
+        self.count = count
+        self.completions = []      # 每个已完成 phase 的完成时刻
+        self._arr = 0
+        self._tx = 0
+        self._t = 0.0
+
+    def _maybe_complete(self):
+        if self._arr == self.count and self._tx == 0:
+            self.completions.append(self._t)
+            self._arr, self._tx, self._t = 0, 0, 0.0
+
+    def arrive(self, t):
+        self._arr += 1
+        self._t = max(self._t, t)
+        self._maybe_complete()
+
+    def expect_tx(self, nbytes, t):
+        self._tx += nbytes
+        self._t = max(self._t, t)
+
+    def complete_tx(self, nbytes, t):
+        self._tx -= nbytes
+        self._t = max(self._t, t)
+        self._maybe_complete()
+
+    def try_wait(self, parity, t):
+        c = sum(1 for x in self.completions if x &lt;= t)
+        return c % 2 != parity
+
+    def next_pass_time(self, parity, t):
+        &quot;&quot;&quot;已知的完成时刻里，最早让 try_wait(parity) 通过的时刻；没有则 None。&quot;&quot;&quot;
+        for x in sorted(self.completions):
+            if x &gt; t and self.try_wait(parity, x):
+                return x
+        return None
+
+
+class Sim:
+    &quot;&quot;&quot;离散事件模拟器（见模块 docstring）。agents: list of (name, generator)。&quot;&quot;&quot;
+
+    def __init__(self, start=0.0, grid_ready=0.0):
+        self.start = start
+        self.grid_ready = grid_ready
+        self.trigger_time = None
+        self.tma_free = start
+        self.tma_busy = []          # (start, end) 传输区间
+        self.mma_busy = []          # (start, end) consumer 计算区间（stage 不为 None的 compute）
+        self.stage_ready = {}       # stage -&gt; 最近一次 TMA 写落地时刻
+        self.stage_reads = {}       # stage -&gt; [(start, end)]
+        self.stage_writes = {}      # stage -&gt; [(start, end)]
+
+    def run(self, agents):
+        st = []
+        for name, gen in agents:
+            st.append({&quot;name&quot;: name, &quot;gen&quot;: gen, &quot;t&quot;: self.start, &quot;op&quot;: None, &quot;done&quot;: False})
+        for a in st:
+            self._fetch(a)
+        while True:
+            live = [a for a in st if not a[&quot;done&quot;]]
+            if not live:
+                break
+            progressed = False
+            for a in sorted(live, key=lambda a: a[&quot;t&quot;]):
+                if self._step(a):
+                    progressed = True
+                    break
+            if not progressed:
+                # 所有 agent 都卡在 wait 上，而且没有未来的完成事件能放行它们
+                raise Deadlock(&quot;all agents blocked: &quot; + &quot;, &quot;.join(f&quot;{a[&#x27;name&#x27;]}@{a[&#x27;op&#x27;][0]}&quot; for a in live))
+        return {a[&quot;name&quot;]: a[&quot;t&quot;] for a in st}
+
+    def _fetch(self, a, value=None):
+        try:
+            a[&quot;op&quot;] = a[&quot;gen&quot;].send(value) if a[&quot;op&quot;] is not None else next(a[&quot;gen&quot;])
+        except StopIteration:
+            a[&quot;done&quot;] = True
+            a[&quot;op&quot;] = None
+
+    def _step(self, a):
+        op = a[&quot;op&quot;]
+        kind = op[0]
+        t = a[&quot;t&quot;]
+        if kind == &quot;wait&quot;:
+            _, bar, parity = op
+            if not bar.try_wait(parity, t):
+                nt = bar.next_pass_time(parity, t)
+                if nt is None:
+                    return False
+                a[&quot;t&quot;] = t = nt
+        elif kind == &quot;arrive&quot;:
+            op[1].arrive(t)
+        elif kind == &quot;arrive_expect_tx&quot;:
+            op[1].expect_tx(op[2], t)
+            op[1].arrive(t)
+        elif kind == &quot;tma&quot;:
+            _, bar, nbytes, fn, stage = op
+            xs = max(t, self.tma_free)
+            xe = xs + nbytes / TMA_BYTES_PER_US
+            land = xe + TMA_LAT_US
+            self.tma_free = xe
+            self.tma_busy.append((xs, xe))
+            for (rs, re) in self.stage_reads.get(stage, []):
+                if re &gt; xs and rs &lt; land:
+                    raise RaceError(f&quot;WAR on stage {stage}: TMA write [{xs:.2f},{land:.2f}] overlaps read [{rs:.2f},{re:.2f}]&quot;)
+            self.stage_writes.setdefault(stage, []).append((xs, land))
+            self.stage_ready[stage] = max(self.stage_ready.get(stage, 0.0), land)
+            if fn is not None:
+                fn()
+            bar.complete_tx(nbytes, land)
+        elif kind == &quot;compute&quot;:
+            _, us, fn, stage = op
+            if stage is not None:
+                ready = self.stage_ready.get(stage)
+                if ready is None or ready &gt; t:
+                    raise RaceError(f&quot;RAW on stage {stage}: read at {t:.2f} before data lands at {ready}&quot;)
+                for (ws, we) in self.stage_writes.get(stage, []):
+                    if we &gt; t and ws &lt; t + us:
+                        raise RaceError(f&quot;WAR on stage {stage}: read [{t:.2f},{t+us:.2f}] overlaps TMA write [{ws:.2f},{we:.2f}]&quot;)
+                self.stage_reads.setdefault(stage, []).append((t, t + us))
+                self.mma_busy.append((t, t + us))
+            a[&quot;t&quot;] = t + us
+            if fn is not None:
+                fn()
+        elif kind == &quot;grid_wait&quot;:
+            a[&quot;t&quot;] = max(t, self.grid_ready)
+        elif kind == &quot;trigger&quot;:
+            self.trigger_time = t if self.trigger_time is None else max(self.trigger_time, t)
+        else:
+            raise ValueError(f&quot;unknown op {kind}&quot;)
+        self._fetch(a, None)
+        return True
+
+
+def union_length(intervals):
+    &quot;&quot;&quot;区间并集的总长度。&quot;&quot;&quot;
+    tot, cur_s, cur_e = 0.0, None, None
+    for s, e in sorted(intervals):
+        if cur_e is None or s &gt; cur_e:
+            if cur_e is not None:
+                tot += cur_e - cur_s
+            cur_s, cur_e = s, e
+        else:
+            cur_e = max(cur_e, e)
+    if cur_e is not None:
+        tot += cur_e - cur_s
+    return tot
+
+
+def intersect_length(a, b):
+    &quot;&quot;&quot;两组区间（各自取并集后）交集的总长度。&quot;&quot;&quot;
+
+    def merge(iv):
+        out = []
+        for s, e in sorted(iv):
+            if out and s &lt;= out[-1][1]:
+                out[-1][1] = max(out[-1][1], e)
+            else:
+                out.append([s, e])
+        return out
+    A, B = merge(a), merge(b)
+    i = j = 0
+    tot = 0.0
+    while i &lt; len(A) and j &lt; len(B):
+        lo = max(A[i][0], B[j][0])
+        hi = min(A[i][1], B[j][1])
+        if hi &gt; lo:
+            tot += hi - lo
+        if A[i][1] &lt; B[j][1]:
+            i += 1
+        else:
+            j += 1
+    return tot
+
+
+@dataclass
+class Ctx:
+    &quot;&quot;&quot;一个 CTA 的运行上下文（run_gemm 负责构造）。&quot;&quot;&quot;
+    cfg: Cfg
+    A: np.ndarray
+    B: np.ndarray
+    C: np.ndarray
+    m0: int
+    n0: int
+    smemA: np.ndarray
+    smemB: np.ndarray
+    full: list
+    empty: list
+    acc: list
+    pdl_wait: bool = False
+
+    @property
+    def k_tiles(self):
+        return -(-self.cfg.K // self.cfg.BK)
+
+
+# ----------------------------------------------------------------------------- your code
+
+class PipelineState:
+    &quot;&quot;&quot;环形 stage 下标 + phase 位（对照 cutlass/pipeline/sm90_pipeline.hpp 的 PipelineState）。&quot;&quot;&quot;
+
+    def __init__(self, stages, index=0, phase=0, count=0):
+        self.stages, self.index, self.phase, self.count = stages, index, phase, count
+
+    def advance(self):
+        &quot;&quot;&quot;index+1；绕回 0 时翻转 phase；count+1。stages == 1 时只翻 phase。&quot;&quot;&quot;
+        # phase 位让同一个 mbarrier 的相邻两次使用可以区分：第 2n 次和第 2n+1 次完成的奇偶不同
+        if self.stages == 1:
+            self.phase ^= 1
+        else:
+            self.index += 1
+            if self.index == self.stages:
+                self.index = 0
+                self.phase ^= 1
+        self.count += 1
+
+    @classmethod
+    def producer_start(cls, stages):
+        &quot;&quot;&quot;生产者从 phase 1 开始：空 buffer 的 empty barrier 还没完成过任何 phase，wait(1) 立刻通过。&quot;&quot;&quot;
+        return cls(stages, 0, 1, 0)
+
+    @classmethod
+    def consumer_start(cls, stages):
+        &quot;&quot;&quot;消费者从 phase 0 开始：要等第一次 full 完成。&quot;&quot;&quot;
+        return cls(stages, 0, 0, 0)
+
+
+def tma_box_load(src, r0, c0, rows, cols, smem, base):
+    &quot;&quot;&quot;把 src[r0:r0+rows, c0:c0+cols] 按 sw128 写到 smem[base + …]，越界填 0，返回字节数。&quot;&quot;&quot;
+    R, Cn = src.shape
+    r = np.arange(rows)[:, None]
+    c = np.arange(cols)[None, :]
+    gr, gc = r0 + r, c0 + c
+    inb = (gr &lt; R) &amp; (gc &lt; Cn)
+    vals = np.zeros((rows, cols), dtype=smem.dtype)
+    vals[inb] = src[np.minimum(gr, R - 1), np.minimum(gc, Cn - 1)][inb]   # TMA OOB：越界元素填 0
+    smem[base + sw128(r * cols + c)] = vals
+    return rows * cols * ELEM_BYTES                                       # box 总是整块传输
+
+
+def _load_stage(ctx, s, kt, which):
+    cfg = ctx.cfg
+    if which == &quot;A&quot;:
+        return lambda: tma_box_load(ctx.A, ctx.m0, kt * cfg.BK, cfg.BM, cfg.BK, ctx.smemA, s * cfg.BM * cfg.BK)
+    return lambda: tma_box_load(ctx.B, ctx.n0, kt * cfg.BK, cfg.BN, cfg.BK, ctx.smemB, s * cfg.BN * cfg.BK)
+
+
+def producer(ctx):
+    &quot;&quot;&quot;producer warp：等 empty → expect_tx → 两个 TMA → advance。pdl_wait 时先预取 B再 grid_wait。&quot;&quot;&quot;
+    cfg = ctx.cfg
+    bytes_a = cfg.BM * cfg.BK * ELEM_BYTES
+    bytes_b = cfg.BN * cfg.BK * ELEM_BYTES
+    yield (&quot;compute&quot;, SETUP_US, None, None)
+    st = PipelineState.producer_start(cfg.stages)
+    kt = 0
+    if ctx.pdl_wait:
+        # 预取窗口：前 min(stages, k_tiles) 个 stage 先只发 B（权重和前驱无关）
+        n_pre = min(cfg.stages, ctx.k_tiles)
+        pre = []
+        for _ in range(n_pre):
+            s = st.index
+            yield (&quot;wait&quot;, ctx.empty[s], st.phase)
+            yield (&quot;arrive_expect_tx&quot;, ctx.full[s], bytes_a + bytes_b)   # 按整个 stage 声明
+            yield (&quot;tma&quot;, ctx.full[s], bytes_b, _load_stage(ctx, s, kt, &quot;B&quot;), s)
+            pre.append((s, kt))
+            st.advance()
+            kt += 1
+        yield (&quot;grid_wait&quot;,)                                            # griddepcontrol.wait：之后才能读 A（= 前驱的输出）
+        for s, k in pre:
+            yield (&quot;tma&quot;, ctx.full[s], bytes_a, _load_stage(ctx, s, k, &quot;A&quot;), s)
+    while kt &lt; ctx.k_tiles:
+        s = st.index
+        yield (&quot;wait&quot;, ctx.empty[s], st.phase)                          # producer_acquire
+        yield (&quot;arrive_expect_tx&quot;, ctx.full[s], bytes_a + bytes_b)     # 这次 phase要等 A+B 两个 box 的字节
+        yield (&quot;tma&quot;, ctx.full[s], bytes_a, _load_stage(ctx, s, kt, &quot;A&quot;), s)
+        yield (&quot;tma&quot;, ctx.full[s], bytes_b, _load_stage(ctx, s, kt, &quot;B&quot;), s)
+        st.advance()
+        kt += 1
+
+
+def consumer(ctx, wg):
+    &quot;&quot;&quot;consumer warp group：等 full → MMA → arrive empty → advance；最后 trigger + epilogue。&quot;&quot;&quot;
+    cfg = ctx.cfg
+    half = cfg.BM // NUM_CONSUMERS
+    rows = slice(wg * half, (wg + 1) * half)
+    yield (&quot;compute&quot;, SETUP_US, None, None)
+    st = PipelineState.consumer_start(cfg.stages)
+    for _ in range(ctx.k_tiles):
+        s = st.index
+        yield (&quot;wait&quot;, ctx.full[s], st.phase)                          # consumer_wait
+
+        def mma(s=s):
+            a = smem_read(ctx.smemA, s * cfg.BM * cfg.BK, cfg.BM, cfg.BK)[rows]
+            b = smem_read(ctx.smemB, s * cfg.BN * cfg.BK, cfg.BN, cfg.BK)
+            ctx.acc[wg] += a @ b.T                                      # accumulator 留在“寄存器”里
+        yield (&quot;compute&quot;, MMA_US, mma, s)                              # 读 stage s（A 和 B 都在这个 stage）
+        yield (&quot;arrive&quot;, ctx.empty[s])                                 # consumer_release
+        st.advance()
+    if wg == 0:
+        yield (&quot;trigger&quot;,)                                             # launch_dependent_grids（只影响性能）
+
+    def epilogue():
+        r0 = ctx.m0 + wg * half
+        r1 = min(r0 + half, cfg.M)
+        c1 = min(ctx.n0 + cfg.BN, cfg.N)
+        if r1 &gt; r0:
+            ctx.C[r0:r1, ctx.n0:c1] = ctx.acc[wg][: r1 - r0, : c1 - ctx.n0]
+    yield (&quot;compute&quot;, EPI_US, epilogue, None)
+
+
+def run_gemm(A, B, cfg, start=0.0, grid_ready=0.0, pdl_wait=False):
+    &quot;&quot;&quot;跑所有 CTA，返回 (C, report)。&quot;&quot;&quot;
+    C = np.zeros((cfg.M, cfg.N))
+    ends, triggers = [], []
+    rep0 = None
+    for tm in range(-(-cfg.M // cfg.BM)):
+        for tn in range(-(-cfg.N // cfg.BN)):
+            ctx = Ctx(cfg, A, B, C, tm * cfg.BM, tn * cfg.BN,
+                      np.zeros(cfg.stages * cfg.BM * cfg.BK), np.zeros(cfg.stages *cfg.BN * cfg.BK),
+                      [Barrier(1) for _ in range(cfg.stages)],                 # full：producer 的 1 次 arrival + tx
+                      [Barrier(NUM_CONSUMERS) for _ in range(cfg.stages)],     # empty：每个 consumer WG 一次 arrival
+                      [np.zeros((cfg.BM // NUM_CONSUMERS, cfg.BN)) for _ in range(NUM_CONSUMERS)],
+                      pdl_wait=pdl_wait)
+            sim = Sim(start=start, grid_ready=grid_ready)
+            agents = [(&quot;producer&quot;, producer(ctx))] + [(f&quot;consumer{w}&quot;, consumer(ctx, w)) for w in range(NUM_CONSUMERS)]
+            t_end = sim.run(agents)
+            ends.append(max(t_end.values()))
+            triggers.append(sim.trigger_time)
+            if rep0 is None:
+                rep0 = sim
+    report = {
+        &quot;end&quot;: max(ends),
+        &quot;trigger&quot;: max(triggers),
+        &quot;tma_busy&quot;: union_length(rep0.tma_busy),
+        &quot;mma_busy&quot;: union_length(rep0.mma_busy),
+        &quot;overlap&quot;: intersect_length(rep0.mma_busy, rep0.tma_busy),
+    }
+    return C, report
+
+
+def chain(X, W1, W2, cfg1, cfg2, pdl):
+    &quot;&quot;&quot;H = X·W1ᵀ，Y = H·W2ᵀ；返回 (Y, [(0, end1), (start2, end2)])。&quot;&quot;&quot;
+    H, r1 = run_gemm(X, W1, cfg1)
+    if pdl:
+        start2 = r1[&quot;trigger&quot;] + PDL_LAUNCH_US        # 前驱 trigger 之后就启动
+        ready = r1[&quot;end&quot;] + FLUSH_US                  # 但读 H 之前要等前驱完全结束
+        Y, r2 = run_gemm(H, W2, cfg2, start=start2, grid_ready=ready, pdl_wait=True)
+    else:
+        start2 = r1[&quot;end&quot;] + STREAM_GAP_US
+        Y, r2 = run_gemm(H, W2, cfg2, start=start2, grid_ready=start2)
+    return Y, [(0.0, r1[&quot;end&quot;]), (start2, r2[&quot;end&quot;])]</code></pre></div></div></details>
+<h2 id="e1-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>CUTLASS 的 consumer 不是 MMA 一结束就 release，而是 <code>warpgroup_wait&lt;K_PIPE_MMAS&gt;()</code> 之后才 release 上一个 stage（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L417">collective mma</a>）。WGMMA 是异步的：本题的模型假设 MMA 同步完成，加入异步 MMA 后 empty 的时间线会怎样变？</li>
+<li>真实的 epilogue 先把累加器写进 SMEM，再用 TMA store 写回（还要和下一个 tile 的 mainloop 共享 SMEM）。本题把它简化成一个 <code>compute(EPI_US)</code>：它在 Ping-pong 调度里为什么重要（D3）？</li>
+<li>本题的 TMA 引擎是“每个 SM 一个、串行传输”。cluster multicast 时，一个 box 同时落到几个 CTA 的 SMEM，<code>expect_tx</code> 要怎样改？</li>
+<li>两个 GEMM 串联时，<code>chain</code> 的第二个 kernel 在 PDL 下比不用 PDL 早结束 3.2 µs。把 <code>STREAM_GAP_US</code> 换成 CUDA Graph 的 1 µs 再算一次，PDL 还剩多少收益？这说明了什么（D4）？</li>
+</ul>
+
+<nav class="pager"><a href="d4_pdl_chain.html">← 上一题 D4</a><a href="e2_config_search.html">E2 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#e1-1">题面速览</a>
+<a class="o2" href="#e1-2">直觉与类比</a>
+<a class="o2" href="#e1-3">图解：一个 CTA 里的三个 agent 和两组 barrier</a>
+<a class="o2" href="#e1-4">逐步演示</a>
+<a class="o2" href="#e1-5">易错点</a>
+<a class="o2" href="#e1-6">对照文档</a>
+<a class="o2" href="#e1-7">上机验证</a>
+<a class="o2" href="#e1-8">三级提示</a>
+<a class="o2" href="#e1-9">参考解</a>
+<a class="o2" href="#e1-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

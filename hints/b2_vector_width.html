@@ -1,0 +1,1393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B2 · 一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3 cur" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">B2 · Track B · 用 Layout Algebra 重新表达 · 50 分钟 · 中</div><h1>B2 · 一次能搬多宽：max_common_vector、swizzle 上限、对齐与 copy atom</h1><p class="lede">A2 里“每个线程一次搬 4 个 half”是拍脑袋定的。CuTe 用 max_common_vector 从 gmem 视图和 smem layout 推出“两边同时连续”的最长元素段，再和 max_alignment 推出的对齐取 gcd，得到真正的向量宽度，然后挑 copy atom。本题实现这条推导（含 swizzle 的 2^M 上限），用不依赖代数的暴力定义交叉验证，并看清 padding 为什么让“连续”和“对齐”给出不同的答案。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/b2_vector_width.py"><code>mine/b2_vector_width.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_b2_vector_width.py"><code>tests/test_b2_vector_width.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/b2_vector_width.py"><code>solutions/b2_vector_width.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="B2"> 我已完成这道题</label></header>
+<h2 id="b2-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/algebra_compile.html">Layout Algebra 与编译</a> 的 inverse 与 <code>max_common_vector</code> 两行。</li>
+<li><strong>在体系里的位置</strong>：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1451">max_common_vector</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1424">max_common_layout</a> 是普通 layout 的版本；一边是 swizzle 时走 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle_layout.hpp#L509">swizzle_layout.hpp 的重载</a>，结果和 2^M 取 min。对齐由 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1943">max_alignment</a> 给出；<code>copy(src, dst)</code> 不带 atom 时走 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/algorithm/copy.hpp#L247">AutoVectorizingCopyWithAssumedAlignment</a>，向量位宽 = gcd(mcv·元素位宽, 两边的对齐, 128)。copy atom 本身：<code>UniversalCopy</code>、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm80.hpp#L47">SM80_CP_ASYNC_CACHEALWAYS</a>。</li>
+<li><strong>你要实现</strong>：<code>max_common_vector</code>、<code>max_common_layout</code>、<code>brute_vector</code>、<code>vector_bytes</code>、<code>alignment_bytes</code>、<code>copy_atom</code>、<code>max_alignment</code>、<code>auto_vector_bits</code>、<code>copy_plan</code>。Python CuTe 代数和 <code>Swizzled(B, M, S, base)</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>普通 × 普通：<code>common = coalesce(composition(a, right_inverse(b)))</code>，第 0 个模式 stride 为 1 时它的 size 就是答案，否则 1。</li>
+<li>一边是 <code>Swizzle&lt;B,M,S&gt;</code>：先对 base 求，再和 2^M 取 min。两边是同一个 swizzle：不截断。</li>
+<li><code>max_common_layout</code> 的值是 tile 内的 colex 下标：这 n 个元素在两边都连续。</li>
+<li>“连续”不等于“对齐”：<code>max_alignment(f) = gcd(size(p 的第 0 模式), p 第 1 模式的 stride)</code>，<code>p = logical_divide(f, right_inverse(f))</code>；真实宽度是两者的 gcd。tensor 起点指针的对齐 layout 看不到，另外取 min。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：10 组 (gmem, smem) 的 <code>max_common_vector</code> 与真实 CuTe 相同 · 8 组 <code>max_common_layout</code> 与真实 CuTe 逐字符相同 · 参数顺序无关、三种 swizzle 的上限是 2/4/8 · 两个 swizzle 的规则 · 公共 layout 的元素两边都连续 · 暴力定义与代数在 8 组上相同 · padding 一组 mcv 16、<code>max_alignment</code> 2、自动向量 32 位 · 9 个 layout 的 <code>max_alignment</code> 与真实 CuTe 相同 · 10 组 <code>auto_vector_bits</code> 与真实 CuTe 按 copy.hpp 公式算出的位宽相同 · 带对齐要求的暴力定义（封顶 128 位）与自动向量化逐组相等 · 字节数与对齐 · copy atom 名称与非法大小 · 运行例子的 copy plan（含指针偏移 4 字节、K = 60 两种对齐退化）。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>向量化访存</strong>：一条指令每个线程搬 8 或 16 字节（<code>LDG.64/128</code>、<code>STS.128</code>、<code>cp.async</code> 16B），比逐个 2 字节搬少 4–8 倍指令。前提是两边都连续，并且地址按向量宽度对齐。</li>
+<li><strong>copy atom</strong>：一种具体的搬运指令。<code>UniversalCopy&lt;uint64_t&gt;</code> 是一次 8 字节的普通 load/store；<code>SM80_CP_ASYNC_CACHEALWAYS&lt;uint128_t&gt;</code> 是 16 字节的 <code>cp.async</code>。</li>
+<li><strong>padding</strong>：给每行多留几个元素（例如 16 → 18）来错开 bank，是 swizzle 之前常见的老办法。</li>
+</ul>
+</div>
+<h2 id="b2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 两排储物柜之间搬箱子</div><p>gmem 和 smem 是两排编了号的储物柜。一次能推一整辆推车（向量）过去，条件是：这几个东西在两边都放在相邻的柜子里，而且推车停的位置对得上柜门的整数格（对齐）。<code>max_common_vector</code> 量的是“两边同时相邻”最多有几格；swizzle 像是对面每 4 格就换一次门牌顺序，所以最多只能保证 4 格；padding 像是对面每排多了两个空柜：一排里仍然有 16 个相邻，但第二排从第 18 格开始，推车只能按 2 格的整数倍停靠——这是 <code>max_alignment</code> 量出来的。</p>
+</div>
+<h2 id="b2-3">图解：从两个 layout 到一条指令</h2>
+
+<figure class="flow"><div class="flow-head">向量宽度的推导链<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;向量宽度的推导链&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;ab&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;gmem a, smem b&quot;, &quot;s&quot;: &quot;(32,16) 的两个 layout&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ri&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;a ∘ right_inverse(b)&quot;, &quot;s&quot;: &quot;smem 下标 → gmem 偏移&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;co&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;coalesce 取第 0 模式&quot;, &quot;s&quot;: &quot;stride 1 才算&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sw&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;swizzle 上限&quot;, &quot;s&quot;: &quot;min(·, 2^M)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;al&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;max_alignment&quot;, &quot;s&quot;: &quot;段起点的 gcd&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;at&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;copy atom&quot;, &quot;s&quot;: &quot;2/4/8/16 字节&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;ab&quot;, &quot;b&quot;: &quot;ri&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ri&quot;, &quot;b&quot;: &quot;co&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;co&quot;, &quot;b&quot;: &quot;sw&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;co&quot;, &quot;b&quot;: &quot;al&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sw&quot;, &quot;b&quot;: &quot;at&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;al&quot;, &quot;b&quot;: &quot;at&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 170.0}}"></div><figcaption>两条上限都是 layout 代数算出来的（<code>max_common_vector</code> 和 <code>max_alignment</code>），在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/algorithm/copy.hpp#L247">copy.hpp</a> 里取 gcd。只有 tensor 起点指针本身的对齐 layout 看不到：静态 layout 的 tensor 被假定 128 位对齐，动态的只假定 8 位。</figcaption></figure>
+<h2 id="b2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ gmem A tile (32,16):(64,1) 对上 5 种 smem</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;smem 行主序&quot;, &quot;s&quot;: &quot;mcv 16&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s2&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Sw&lt;2,2,2&gt;&quot;, &quot;s&quot;: &quot;mcv 4&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s3&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Sw&lt;3,3,3&gt;&quot;, &quot;s&quot;: &quot;mcv 8&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pd&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;pad 18&quot;, &quot;s&quot;: &quot;连续 16，对齐 2&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mm&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;smem M-major&quot;, &quot;s&quot;: &quot;mcv 1&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="p"><div class="step-title">1. 普通行主序</div><p><code>right_inverse((32,16):(16,1)) = (16,32):(32,1)</code>，复合 gmem 后 coalesce 的第 0 个模式是 <code>16:1</code>：一行 16 个 half 两边都连续，mcv = 16。真实 CuTe：mcv = 16，mcl = <code>_16:_32</code>（tile 下标 0, 32, 64…：同一行的 16 个元素）。</p>
+</div><div class="step" data-hl="s2"><div class="step-title">2. Swizzle&lt;2,2,2&gt;</div><p>swizzle 只改第 M 位以上的位，2^2 = 4 个元素以内保证连续，再长就不保证：mcv = 4，mcl = <code>_4:_32</code>。这正是 A2 的配置：每线程 4 个 half = 8 字节，<code>UniversalCopy&lt;uint64_t&gt;</code>。</p>
+</div><div class="step" data-hl="s3"><div class="step-title">3. Swizzle&lt;3,3,3&gt;</div><p>上限变成 8：mcv = 8 = 16 字节，可以用 <code>cp.async</code> 16B（<code>SM80_CP_ASYNC_CACHEALWAYS&lt;uint128_t&gt;</code>，sgemm_sm80.cu 用的就是它）。但每线程得有 8 个连续值：ValLayout 要改成 (1,8)，线程布局随之改成 (32,2) 或 (16,4)。</p>
+</div><div class="step" data-hl="pd"><div class="step-title">4. padding</div><p><code>(32,16):(18,1)</code>：<code>right_inverse</code> 只覆盖从 0 开始的连续段 <code>_16:_32</code>（一行），所以 mcv 仍然是 16。但下一段从 18 开始：<code>logical_divide(f, right_inverse(f)) = (_16,_32):(_1,_18)</code>，<code>max_alignment = gcd(16, 18) = 2</code>。自动向量化的位宽 <code>gcd(16·16, 2·16, 128) = 32</code>，<code>copy_plan(g, pad, 8)</code> 选出 <code>UniversalCopy&lt;uint32_t&gt;</code>；带对齐要求的暴力定义也给 2 个 half。</p>
+</div><div class="step" data-hl="mm"><div class="step-title">5. 主序不一致</div><p>smem 改成 M-major <code>(32,16):(1,32)</code>：gmem 里连续的是 K 方向，smem 里连续的是 M 方向，没有一个方向两边都连续：mcv = 1，mcl = <code>_1:_0</code>，只能一次 2 字节。这时要么换 smem 主序，要么接受转置的代价（或者用 <code>ldmatrix.trans</code> 一类的指令在读的那一侧转置）。</p>
+</div></div></div>
+<h2 id="b2-5">易错点</h2>
+<ul>
+<li><strong>swizzle 的上限用 2^B 或 2^S。</strong> 保证不变的是低 M 位，所以是 2^M。测试 <code>test_swizzled_argument_order_does_not_matter</code> 用三个 B = M = S 相同的 swizzle 检查，<code>test_max_common_vector_matches_real_cute[grow_ssw333]</code> 是 8。</li>
+<li><strong>两边同一个 swizzle 也截断。</strong> Sw ∘ B0 ∘ rinv(Sw ∘ B1) 里两个 swizzle 抵消，不截断：<code>test_two_swizzles</code> 要 512。</li>
+<li><strong><code>max_common_layout</code> 返回偏移而不是下标。</strong> 它的值是 b 的定义域（tile 内 colex 下标），<code>_16:_32</code> 而不是 <code>_16:_1</code>。测试 <code>test_max_common_layout_matches_real_cute</code>。</li>
+<li><strong>暴力定义不查对齐。</strong> 不要求 <code>a(i) % n == 0</code> 时 <code>Swizzle&lt;2,2,2&gt;</code> 会被算成更大的值（第 0 行没被打乱）。测试 <code>test_brute_force_agrees_with_algebra</code>。</li>
+<li><strong>以为 mcv 就是最终宽度。</strong> 还要和 <code>max_alignment</code>、每线程值数、指针偏移、atom 支持的大小取 gcd / min。测试 <code>test_copy_plans_for_the_running_example</code>：padding 一组 mcv 16、实际 4 字节；K = 60 时 gmem 的 <code>max_alignment = gcd(16, 60) = 4</code>，16 字节 <code>cp.async</code> 降成 8 字节。</li>
+<li><strong>整块连续时找不到“下一段”。</strong> 这时 rest 模式是 <code>_1:_0</code>，stride 0，gcd(512, 0) = 512，不要当成 0 或报错。测试 <code>test_max_alignment_matches_real_cute[srow]</code>。</li>
+</ul>
+<h2 id="b2-6">对照文档</h2>
+<blockquote>
+<p>“Copy 不只需要知道‘搬哪个元素’，还要知道能否把相邻元素合并成一次向量化搬运。CuTe 可以利用 source/destination Layout 的映射关系，反向定位并复合，再 coalesce，检查共同连续模式，从而推导两边共同支持的向量宽度。这不等于单凭 Layout 就能保证最终一定发出 128-bit load/store。实际还要考虑地址对齐、指令支持、边界、数据类型和编译器 lowering。”</p>
+</blockquote>
+<p>“反向定位并复合，再 coalesce” 就是 <code>coalesce(composition(a, right_inverse(b)))</code>；“还要考虑地址对齐” 在 CuTe 里同样是 layout 代数：<code>max_alignment</code>。本题的三个例子：swizzle 把 16 压到 4 或 8；padding 连续 16、对齐只有 2；指针偏移 4 字节或 K = 60 这种 layout 看不全的对齐，要另外取 min。</p>
+<h2 id="b2-7">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/b2_vector_width.cpp       # 真实 CuTe，本机编译运行
+./check.sh oracle b2                                   # 重新生成 tests/golden/b2_vector_width.json
+</code></pre>
+<p>本机的真实输出：</p>
+<pre><code class="language-text">plain      mcv =  16   max_alignment(smem) = 512   mcl = _16:_32
+Sw&lt;1,1,1&gt;  mcv =   2   max_alignment(smem) =   2   mcl = _2:_32
+Sw&lt;2,2,2&gt;  mcv =   4   max_alignment(smem) =   4   mcl = _4:_32
+Sw&lt;3,3,3&gt;  mcv =   8   max_alignment(smem) =   8   mcl = _8:_32
+pad 18     mcv =  16   max_alignment(smem) =   2   mcl = _16:_32
+M-major    mcv =   1   max_alignment(smem) = 512   mcl = _1:_0
+</code></pre>
+<p>pad 18 那一行就是“连续不等于对齐”的证据：mcv 是 16，<code>max_alignment</code> 只有 2。swizzle 的 <code>max_alignment</code> 正好是 2^M，和 mcv 的截断一致。</p>
+<h2 id="b2-8">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">g = Layout((32, 16), (64, 1)); s = Layout((32, 16), (16, 1))
+max_common_vector(g, s)                         # 16
+max_common_layout(g, s)                         # _16:_32
+max_common_vector(g, Swizzled(2, 2, 2, s))      # 4
+brute_vector(g, Layout((32, 16), (18, 1)), 512) # 2
+max_alignment(Layout((32, 16), (18, 1)))        # 2
+auto_vector_bits(g, Layout((32, 16), (18, 1)))  # 32
+vector_bytes(16), vector_bytes(3)               # (16, 2)
+alignment_bytes([0, 8, 24])                     # 8
+copy_plan(g, Swizzled(3, 3, 3, s), 8, async_=True)
+# {'mcv': 8, 'vec': 8, 'bytes': 16, 'atom': 'SM80_CP_ASYNC_CACHEALWAYS&lt;uint128_t&gt;'}
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>为什么是 <code>composition(a, right_inverse(b))</code> 而不是 <code>composition(b, right_inverse(a))</code>？两者的 mcv 会不同吗？</li>
+<li><code>Swizzle&lt;2,2,2&gt;</code> 的 mcv 是 4，而 A5 里 <code>Swizzle&lt;1,3,3&gt;</code> 能消掉 LDS 冲突：它的 mcv 是多少？这对 copy 意味着什么？</li>
+<li>padding 为什么让 mcv 和 <code>max_alignment</code> 给出不同的答案？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>max_common_vector</code>：先分情况（两边都是 Swizzled、只有一边、都不是）。普通情况：<code>inv = right_inverse(b)</code>，<code>common = coalesce(composition(a, inv))</code>，取第 0 个模式（如果 shape 是元组），stride 为 1 就返回它的 shape。</li>
+<li><code>max_common_layout</code>：同样的 <code>common</code> 和第 0 个模式 <code>m0</code>，返回 <code>composition(inv, m0)</code>；Swizzled 时再 <code>composition(结果, Layout(2^M))</code> 截断（结果本来更短就不截）。</li>
+<li><code>brute_vector</code>：建一个“b 值 → 下标”的字典；n 从 2 开始翻倍，对每个 <code>b(i) % n == 0</code> 的 i 检查 <code>a(i) % n == 0</code> 和后面 n−1 个元素；失败就返回上一个 n。</li>
+<li><code>vector_bytes</code>：从 1 字节开始翻倍，直到超过 cap 或不再整除总字节数。</li>
+<li><code>max_alignment</code>：Swizzled 时 <code>gcd(2^M, max_alignment(base))</code>；否则 <code>f = coalesce(L)</code>，<code>p = logical_divide(f, right_inverse(f))</code>，<code>gcd(product(p.mode(0).shape), p.mode(1).stride)</code>。</li>
+<li><code>auto_vector_bits</code>：照抄 copy.hpp 的两行 gcd；mcv ≤ 1 时直接返回元素位宽。</li>
+<li><code>copy_plan</code>：<code>bytes = min(auto_vector_bits // 8, vector_bytes(vals_per_thread), alignment_bytes(base_offsets_bytes))</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li><code>right_inverse(b)</code> 把 smem 偏移翻回 tile 下标，再用 a 得到 gmem 偏移：结果是“smem 第 j 个连续位置在 gmem 的哪里”，第 0 个模式 stride 为 1 就说明两边一起连续。反过来复合得到的是同一个关系的逆，对双射的情况 mcv 相同；CuTe 选这个方向是因为 b 常常是带 swizzle 的那一边，重载只需处理它。</li>
+<li>2^3 = 8。它比 <code>Swizzle&lt;2,2,2&gt;</code> 允许更宽的 copy（8 个 half = 16 字节），同时还能消掉 A5 模型里的 LDS.32 冲突；swizzle 的选择要同时看“写的人”（copy 宽度 ≤ 2^M）和“读的人”（bank）。</li>
+<li>mcv 问的是“从 0 开始有多少个元素两边都连续”，padding 的第一行确实有 16 个；它不问“下一段从哪里开始”。<code>max_alignment</code> 问的正是这个：连续段长 16、下一段起点 18，任何一段的起点只能保证是 2 的倍数。CuTe 在 <code>AutoVectorizingCopyWithAssumedAlignment</code> 里把两个答案取 gcd；用显式 copy atom 时，选得比这更宽就是你的 bug（运行时地址不对齐会出错）。</li>
+</ol>
+</div></details></div></details>
+<h2 id="b2-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/b2_vector_width.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/b2_vector_width.py</span><span class="muted small">746 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;B2 · 一次能搬多宽：max_common_vector、swizzle 的上限、对齐与 copy atom 的选择 — reference solution.
+
+A2 里每个线程一次搬 4 个 half（8 字节），这个“4”是我们拍脑袋定的。CuTe 不靠拍脑袋：make_tiled_copy 之前，
+CUTLASS 用 max_common_vector(gmem 视图, smem layout) 求出“两边同时连续”的最长元素段，再挑一个不超过它的
+copy atom（文档第 6 节“编译器能优化什么”：向量化是从 layout 推出来的，不是写死的）。这一题实现这个推导，
+并看清它的边界：swizzle 把上限压到 2^M，padding 让 layout 上的答案和真实对齐不一致。
+期望结果来自 oracle/b2_vector_width.cpp（真实 CuTe 的 max_common_vector / max_common_layout）。
+
+约定
+- 所有 layout 的定义域是 tile 坐标 (m, k)，按 colex 编号 i（m 最快），值是元素偏移（不是字节）。
+- 普通 layout 用 given 的 Layout；swizzle 过的 SMEM layout 用 given 的 Swizzled(B, M,S, base)：
+  Swizzled(i) = swizzle(B, M, S, base(i))，repr 和 CuTe 一致：Sw&lt;2,2,2&gt; o _0 o (_32,_16):(_16,_1)。
+- half：elem_bytes = 2。
+
+API（Layout、composition、coalesce、right_inverse、swizzle、Swizzled 等是 given）
+    max_common_vector(a, b) -&gt; int
+        普通 × 普通：common = coalesce(composition(a, right_inverse(b)))；第 0 个模式stride 为 1 时返回它的 size，否则 1。
+        任意一边是 Swizzled：先对 base 求，再和 2^M 取 min；两边都是 Swizzled：同一个 swizzle 时不截断，
+        不同时和两个 2^M 取 min（swizzle_layout.hpp 的规则）。
+    max_common_layout(a, b) -&gt; Layout
+        普通 × 普通：inv = right_inverse(b)；第 0 个模式 stride 为 1 时返回 composition(inv, 那个模式)，否则 _1:_0。
+        结果的值是 tile 内的 colex 下标 i：这 n 个元素在两边都连续。Swizzled 一边：截断到前2^M 个（composition(common, Layout(2^M))）。
+    brute_vector(a, b, size) -&gt; int
+        不用代数的定义：最大的 2 的幂 n（n 整除 size），使得对每个 b(i) % n == 0 的 i：a(i)% n == 0，
+        并且 b 值为 b(i)+j（0 &lt; j &lt; n）的元素都存在、它在 a 里的值正好是 a(i)+j。
+        （b 里每个对齐的 n 元素块，在 a 里也是对齐的连续块：这就是硬件向量访存的条件。）
+    vector_bytes(n_elems, elem_bytes=2, cap=16) -&gt; int
+        不超过 cap、且整除 n_elems·elem_bytes 的最大 2 的幂字节数。例：16 个 half → 16；3个 half → 2。
+    alignment_bytes(byte_offsets, cap=16) -&gt; int    所有偏移的公共 2 的幂对齐（不超过 cap）；全 0 时返回 cap
+    copy_atom(nbytes, async_=False) -&gt; str
+        同步：UniversalCopy&lt;uint16_t | uint32_t | uint64_t | uint128_t&gt;（2/4/8/16 字节）。
+        cp.async：SM80_CP_ASYNC_CACHEALWAYS&lt;uint32_t | uint64_t | uint128_t&gt;（4/8/16 字节，cp.async.ca，
+        sgemm_sm80.cu 用的就是 &lt;uint128_t&gt;）。其它大小 ValueError。
+    max_alignment(layout) -&gt; int    这个 layout 能保证的对齐（元素个数），layout.hpp 的 max_alignment：
+        f = coalesce(layout)；p = logical_divide(f, right_inverse(f))；返回 gcd(size(p 的第 0 个模式), p 第 1 个模式的 stride)
+        （stride 是元组时取展平后的第一个）。Swizzled：gcd(2^M, max_alignment(base))。
+        例：(32,16):(18,1) → 2（行起点 18r 只保证 2 个元素对齐），(32,16):(16,1) → 512。
+    auto_vector_bits(a, b, elem_bits=16, max_vec_bits=128) -&gt; int
+        algorithm/copy.hpp 里 AutoVectorizingCopyWithAssumedAlignment 的公式：
+        mcv = max_common_vector(a, b)；mcv ≤ 1 时返回 elem_bits；
+        align = gcd(max_alignment(a)·elem_bits, max_alignment(b)·elem_bits, max_vec_bits)；
+        返回 gcd(mcv·elem_bits, align)。
+    copy_plan(a, b, vals_per_thread, elem_bits=16, base_offsets_bytes=(0,), async_=False) -&gt; dict
+        {&quot;mcv&quot;: max_common_vector(a, b),
+         &quot;bytes&quot;: min(auto_vector_bits(a, b) / 8, vector_bytes(vals_per_thread), alignment_bytes(base_offsets_bytes)),
+         &quot;vec&quot;: bytes / 元素字节数, &quot;atom&quot;: copy_atom(bytes, async_)}
+        base_offsets_bytes 是 tensor 起点相对 16 字节对齐地址的偏移（layout 看不到的那部分对齐）。
+&quot;&quot;&quot;
+from __future__ import annotations
+
+from math import gcd
+
+def is_tuple(x) -&gt; bool:
+    return isinstance(x, tuple)
+
+
+def flatten(t) -&gt; tuple:
+    &quot;&quot;&quot;(2, (3, 4)) -&gt; (2, 3, 4);  5 -&gt; (5,).&quot;&quot;&quot;
+    if not is_tuple(t):
+        return (t,)
+    out = ()
+    for e in t:
+        out += flatten(e)
+    return out
+
+
+def fmt_tuple(t, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;Format an IntTuple the way cute::print does: (_2,(_3,_4)) for static ints.&quot;&quot;&quot;
+    if is_tuple(t):
+        return &quot;(&quot; + &quot;,&quot;.join(fmt_tuple(e, static) for e in t) + &quot;)&quot;
+    return (&quot;_&quot; if static else &quot;&quot;) + str(t)
+
+
+def fmt_layout(shape, stride, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;cute::print of a Layout: &quot;&lt;shape&gt;:&lt;stride&gt;&quot;.&quot;&quot;&quot;
+    return fmt_tuple(shape, static) + &quot;:&quot; + fmt_tuple(stride, static)
+
+
+def parse_tuple(s: str):
+    &quot;&quot;&quot;Inverse of fmt_tuple. Accepts &#x27;_4&#x27; or &#x27;4&#x27;. &#x27;(_2,(_3,_4))&#x27; -&gt; (2, (3, 4)).&quot;&quot;&quot;
+    s = s.strip()
+    pos = 0
+
+    def parse():
+        nonlocal pos
+        if s[pos] == &quot;(&quot;:
+            pos += 1
+            items = []
+            while s[pos] != &quot;)&quot;:
+                items.append(parse())
+                if s[pos] == &quot;,&quot;:
+                    pos += 1
+            pos += 1
+            return tuple(items)
+        start = pos
+        while pos &lt; len(s) and s[pos] not in &quot;,)&quot;:
+            pos += 1
+        tok = s[start:pos].lstrip(&quot;_&quot;)
+        return int(tok)
+
+    v = parse()
+    if pos != len(s):
+        raise ValueError(f&quot;trailing characters in {s!r}&quot;)
+    return v
+
+
+def parse_layout(s: str):
+    &quot;&quot;&quot;&#x27;(_4,_8):(_8,_1)&#x27; -&gt; ((4, 8), (8, 1)). A swizzled/composed layout is not accepted.&quot;&quot;&quot;
+    shape_s, stride_s = _split_top_colon(s.strip())
+    return parse_tuple(shape_s), parse_tuple(stride_s)
+
+
+def _split_top_colon(s: str):
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == &quot;(&quot;:
+            depth += 1
+        elif ch == &quot;)&quot;:
+            depth -= 1
+        elif ch == &quot;:&quot; and depth == 0:
+            return s[:i], s[i + 1:]
+    raise ValueError(f&quot;no top-level &#x27;:&#x27; in {s!r}&quot;)
+# ---------------------------------------------------------------- shared core (given) -----------
+# Static-integer mirror of CuTe&#x27;s Layout algebra at the pinned commit (include/cute/layout.hpp).
+from math import prod as _mprod
+
+
+class Underscore:
+    &quot;&quot;&quot;CuTe&#x27;s `_` (also spelled X in Step&lt;...&gt;): keep this mode when slicing; drop it when dicing.&quot;&quot;&quot;
+
+    def __repr__(self):
+        return &quot;_&quot;
+
+
+_ = Underscore()
+X = _
+
+
+def is_underscore(x) -&gt; bool:
+    return isinstance(x, Underscore)
+
+
+def product(t) -&gt; int:
+    &quot;&quot;&quot;Product of all leaves of an IntTuple.&quot;&quot;&quot;
+    return _mprod(flatten(t))
+
+
+def rank(t) -&gt; int:
+    return len(t) if is_tuple(t) else 1
+
+
+def get(t, i):
+    &quot;&quot;&quot;get&lt;i&gt;(t); get&lt;0&gt; of a non-tuple is the value itself (CuTe convention).&quot;&quot;&quot;
+    if is_tuple(t):
+        return t[i]
+    if i != 0:
+        raise IndexError(i)
+    return t
+
+
+def unwrap(t):
+    while is_tuple(t) and len(t) == 1:
+        t = t[0]
+    return t
+
+
+def ceil_div(a, b):
+    &quot;&quot;&quot;cute::ceil_div on IntTuples (int_tuple.hpp).&quot;&quot;&quot;
+    if is_tuple(a):
+        if is_tuple(b):
+            b = tuple(b) + (1,) * (len(a) - len(b))
+            return tuple(ceil_div(x, y) for x, y in zip(a, b))
+        out, rest = (), b
+        for ai in a:
+            out += (ceil_div(ai, rest),)
+            rest = ceil_div(rest, ai)
+        return out
+    if is_tuple(b):
+        return ceil_div(a, product(b))
+    return (a + b - 1) // b
+
+
+def crd2idx(coord, shape, stride):
+    &quot;&quot;&quot;stride.hpp crd2idx(c, s, d). An int coord on a tuple shape is split colexicographically and
+    the LAST mode absorbs the remainder (so indices past size() extend the last mode).
+    Underscore coordinates count as 0 (this is the offset used when slicing).&quot;&quot;&quot;
+    if is_underscore(coord):
+        return 0
+    if is_tuple(coord):
+        if not is_tuple(shape) or len(coord) != len(shape):
+            raise ValueError(&quot;mismatched ranks&quot;)
+        return sum(crd2idx(c, s, d) for c, s, d in zip(coord, shape, stride))
+    if is_tuple(shape):
+        total, c = 0, coord
+        for k, (s, d) in enumerate(zip(shape, stride)):
+            if k == len(shape) - 1:
+                total += crd2idx(c, s, d)
+            else:
+                c, m = divmod(c, product(s))
+                total += crd2idx(m, s, d)
+        return total
+    return coord * stride
+
+
+def idx2crd(idx, shape, stride):
+    &quot;&quot;&quot;stride.hpp idx2crd(i, s, d): (i // d) % s per leaf (inverse of a compact layout).&quot;&quot;&quot;
+    if is_tuple(shape):
+        return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))
+    if shape == 1:          # size-1 mode: coordinate is 0 (skips a possible stride-0 division)
+        return 0
+    return (idx // stride) % shape
+
+
+def crd2crd_1d(coord, shape):
+    &quot;&quot;&quot;Colexicographic 1-D index of a coordinate inside one mode&#x27;s shape (crd2idx(c, s)).&quot;&quot;&quot;
+    if not is_tuple(coord):
+        return coord
+    fc, fs = flatten(coord), flatten(shape)
+    i = 0
+    for c, s in zip(reversed(fc), reversed(fs)):
+        i = i * s + c
+    return i
+
+
+class Layout:
+    &quot;&quot;&quot;A CuTe Layout (Shape, Stride) of static ints. Calling it maps coord/index -&gt;offset.&quot;&quot;&quot;
+
+    def __init__(self, shape, stride=None):
+        if stride is None:
+            stride = _compact_left(shape)
+        self.shape, self.stride = shape, stride
+
+    # -- function view
+    def __call__(self, *c):
+        c = c[0] if len(c) == 1 else tuple(c)
+        if _has_underscore(c):
+            raise TypeError(&quot;use slice_layout(coord, layout) for coordinates containing _&quot;)
+        return crd2idx(c, self.shape, self.stride)
+
+    def size(self) -&gt; int:
+        return product(self.shape)
+
+    def cosize(self) -&gt; int:
+        return self(self.size() - 1) + 1 if self.size() &gt; 0 else 0
+
+    def rank(self) -&gt; int:
+        return rank(self.shape)
+
+    def mode(self, i) -&gt; &quot;Layout&quot;:
+        return Layout(get(self.shape, i), get(self.stride, i))
+
+    def map(self) -&gt; list:
+        &quot;&quot;&quot;[L(0), L(1), ..., L(size-1)]&quot;&quot;&quot;
+        return [self(i) for i in range(self.size())]
+
+    def __eq__(self, other):
+        return isinstance(other, Layout) and (self.shape, self.stride) == (other.shape, other.stride)
+
+    def __hash__(self):
+        return hash((self.shape, self.stride))
+
+    def __repr__(self):
+        return fmt_layout(self.shape, self.stride)
+
+
+def _compact_left(shape, start=1):
+    &quot;&quot;&quot;compact_major&lt;LayoutLeft&gt;: column-major strides for shape, starting at `start`.
+    A size-1 mode gets stride 0 (stride.hpp detail::compact), e.g. (4,1) -&gt; (1,0).&quot;&quot;&quot;
+    if is_tuple(shape):
+        out, cur = [], start
+        for s in shape:
+            out.append(_compact_left(s, cur))
+            cur *= product(s)
+        return tuple(out)
+    return 0 if shape == 1 else start
+
+
+def _has_underscore(c) -&gt; bool:
+    if is_tuple(c):
+        return any(_has_underscore(e) for e in c)
+    return is_underscore(c)
+
+
+def make_layout(*layouts) -&gt; Layout:
+    &quot;&quot;&quot;make_layout(L0, L1, ...): concatenation; ONE argument still wraps: shape (s0,).&quot;&quot;&quot;
+    return Layout(tuple(l.shape for l in layouts), tuple(l.stride for l in layouts))
+
+
+def _as_layout(t) -&gt; Layout:
+    &quot;&quot;&quot;A tiler element that is an int n means the layout n:1 (make_layout(n)).&quot;&quot;&quot;
+    return t if isinstance(t, Layout) else Layout(t, 1 if not is_tuple(t) else _compact_left(t))
+
+
+def _append_mode(shape, stride, s, d):
+    if is_tuple(shape):
+        return shape + (s,), stride + (d,)
+    return (shape, s), (stride, d)
+
+
+def _bw_coalesce(old_shape, old_stride, new_shape, new_stride) -&gt; Layout:
+    &quot;&quot;&quot;layout.hpp detail::bw_coalesce, iterating from the back.&quot;&quot;&quot;
+    for s, d in zip(reversed(old_shape), reversed(old_stride)):
+        if s == 1:
+            continue
+        if new_shape == 1:
+            new_shape, new_stride = s, d
+        elif s * d == get(new_stride, 0):
+            if is_tuple(new_shape):
+                new_shape = (s * new_shape[0],) + new_shape[1:]
+                new_stride = (d,) + new_stride[1:]
+            else:
+                new_shape, new_stride = s * new_shape, d
+        else:
+            if is_tuple(new_shape):
+                new_shape, new_stride = (s,) + new_shape, (d,) + new_stride
+            else:
+                new_shape, new_stride = (s, new_shape), (d, new_stride)
+    if new_shape == 1:
+        return Layout(1, 0)
+    return Layout(new_shape, new_stride)
+
+
+def coalesce(layout: Layout, profile=None) -&gt; Layout:
+    &quot;&quot;&quot;cute::coalesce; with a tuple profile, coalesce each mode separately (transform_layout).&quot;&quot;&quot;
+    if is_tuple(profile):
+        return transform_layout(layout, profile, lambda l, t: coalesce(l, t))
+    fs, fd = flatten(layout.shape), flatten(layout.stride)
+    return _bw_coalesce(fs[:-1], fd[:-1], fs[-1], fd[-1])
+
+
+def coalesce_x(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;detail::coalesce_x: like coalesce but keeps the function correct OUTSIDE the domain too:
+    a terminal size-1 mode starts the fold as shape 2 so its stride survives.&quot;&quot;&quot;
+    fs, fd = flatten(layout.shape), flatten(layout.stride)
+    last = 2 if fs[-1] == 1 else fs[-1]
+    return _bw_coalesce(fs[:-1], fd[:-1], last, fd[-1])
+
+
+def filter_layout(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;cute::filter: replace stride-0 modes by size 1, then coalesce.&quot;&quot;&quot;
+
+    def fz(s, d):
+        if is_tuple(s):
+            return tuple(fz(a, b) for a, b in zip(s, d))
+        return 1 if d == 0 else s
+    return coalesce(Layout(fz(layout.shape, layout.stride), layout.stride))
+
+
+def transform_layout(t0: Layout, t1, f) -&gt; Layout:
+    &quot;&quot;&quot;transform_layout(layout, tuple, f): f on the first min(rank) modes, remaining modes of
+    BOTH appended unchanged (here: the leftover layout modes; leftover tiler modes are invalid).&quot;&quot;&quot;
+    r0, r1 = t0.rank(), len(t1)
+    if r1 &gt; r0:
+        raise ValueError(&quot;too many modes in tiler&quot;)
+    modes = [f(t0.mode(i), t1[i]) for i in range(r1)] + [t0.mode(i) for i in range(r1, r0)]
+    return make_layout(*modes)
+
+
+def _composition_impl(lhs_shape, lhs_stride, rhs_shape, rhs_stride) -&gt; Layout:
+    if is_tuple(rhs_shape):                                  # right-distributivity
+        return make_layout(*[_composition_impl(lhs_shape, lhs_stride, s, d)
+                             for s, d in zip(rhs_shape, rhs_stride)])
+    if rhs_stride == 0:                                      # static stride-0 shortcut
+        return Layout(rhs_shape, rhs_stride)
+    if not is_tuple(lhs_shape):                              # integral lhs
+        return Layout(rhs_shape, rhs_stride * lhs_stride)
+    R = len(lhs_shape)
+    res_s, res_d, rest_s, rest_d = (), (), rhs_shape, rhs_stride
+    for i in range(R - 1):
+        cs, cd = lhs_shape[i], lhs_stride[i]
+        if not (abs(rest_d) % cs == 0 or abs(rest_d) &lt; cs):
+            raise ValueError(&quot;Stride Divisibility Condition&quot;)
+        next_s = ceil_div(cs, abs(rest_d))
+        next_d = ceil_div(abs(rest_d), cs) * (1 if rest_d &gt;= 0 else -1)
+        if next_s == 1 or rest_s == 1:
+            rest_d = next_d
+            continue
+        new_s = min(next_s, rest_s)
+        if rest_s % new_s != 0:
+            raise ValueError(&quot;Shape Divisibility Condition&quot;)
+        res_s, res_d = res_s + (new_s,), res_d + (rest_d * cd,)
+        rest_s, rest_d = rest_s // new_s, next_d
+    if len(res_s) == 0:
+        return Layout(rest_s, rest_d * lhs_stride[R - 1])
+    if rest_s == 1:
+        return Layout(unwrap(res_s), unwrap(res_d))
+    return Layout(res_s + (rest_s,), res_d + (rest_d * lhs_stride[R - 1],))
+
+
+def composition(lhs: Layout, rhs) -&gt; Layout:
+    &quot;&quot;&quot;cute::composition(lhs, rhs). rhs: Layout, int n (== n:1), _ (identity) or a tuple tiler
+    (by-mode; lhs modes NOT hit by the tiler are DROPPED, unlike logical_divide).&quot;&quot;&quot;
+    if isinstance(rhs, Layout):
+        f = coalesce_x(lhs)
+        return _composition_impl(f.shape, f.stride, rhs.shape, rhs.stride)
+    if is_tuple(rhs):
+        if len(rhs) &gt; lhs.rank():
+            raise ValueError(&quot;too many modes in tiler&quot;)
+        return make_layout(*[composition(lhs.mode(i), rhs[i]) for i in range(len(rhs))])
+    if is_underscore(rhs):
+        return lhs
+    f = coalesce_x(lhs)
+    return _composition_impl(f.shape, f.stride, rhs, 1)
+
+
+def _complement_prefix(shape, stride):
+    shape, stride = list(flatten(shape)), list(flatten(stride))
+    R = len(shape)
+    res_s, res_d = [], [1]
+    for _i in range(R - 1):
+        min_d = min(stride)
+        k = stride.index(min_d)
+        new_s = min_d // res_d[-1]
+        if new_s == 0:
+            raise ValueError(&quot;Non-injective Layout detected in complement.&quot;)
+        res_s.append(new_s)
+        res_d.append(min_d * shape[k])
+        del shape[k], stride[k]
+    new_s = stride[0] // res_d[-1]
+    if new_s == 0:
+        raise ValueError(&quot;Non-injective Layout detected in complement.&quot;)
+    res_s.append(new_s)
+    return tuple(res_s), tuple(res_d), stride[0] * shape[0]
+
+
+def complement(layout: Layout, cotarget=None) -&gt; Layout:
+    &quot;&quot;&quot;cute::complement. Without cotarget the result keeps a terminal size-1 mode(..., _1) whose
+    stride defines the complement on the extended domain (pinned-commit semantics).&quot;&quot;&quot;
+    f = filter_layout(layout)
+    fs, fd = f.shape, f.stride
+    if not is_tuple(fd) and fd == 0:                         # irreducible rank-1 stride-0
+        if cotarget is None:
+            return Layout(1, 1)
+        return Layout(product(cotarget), 1)
+    res_s, res_d, new_d = _complement_prefix(fs, fd)
+    if cotarget is None:
+        res = coalesce(Layout(res_s, res_d))
+        if res.size() == 1:
+            return Layout(1, new_d)
+        rs = res.shape if is_tuple(res.shape) else (res.shape,)
+        rd = res.stride if is_tuple(res.stride) else (res.stride,)
+        return Layout(rs + (1,), rd + (new_d,))
+    rest_s = product(ceil_div(cotarget, new_d))              # coalesce(static shape) == product
+    return coalesce(Layout((res_s, rest_s), (res_d, new_d)))
+
+
+def slice_tuple(c, t):
+    &quot;&quot;&quot;underscore.hpp slice(c, t): keep elements of t paired with _ (flattening one level per tuple).&quot;&quot;&quot;
+    if is_tuple(c):
+        out = ()
+        for ci, ti in zip(c, t):
+            out += _lift_slice(ci, ti)
+        return out
+    return t if is_underscore(c) else ()
+
+
+def _lift_slice(c, t):
+    if is_tuple(c):
+        out = ()
+        for ci, ti in zip(c, t):
+            out += _lift_slice(ci, ti)
+        return out
+    return (t,) if is_underscore(c) else ()
+
+
+def slice_layout(c, layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;Layout(c) with underscores: the sub-layout of the _ modes (offset is crd2idx(c) with _ -&gt; 0).&quot;&quot;&quot;
+    return Layout(slice_tuple(c, layout.shape), slice_tuple(c, layout.stride))
+
+
+def zip_tuples(a, b):
+    &quot;&quot;&quot;cute::zip(a, b) on IntTuples: transpose ((a0,a1,...),(b0,b1,...)) -&gt; ((a0,b0),(a1,b1),...);
+    if a is not a tuple the result is ((a, b),).&quot;&quot;&quot;
+    if is_tuple(a):
+        return tuple((x, y) for x, y in zip(a, b))
+    return ((a, b),)
+
+
+def zip2_by(t, guide):
+    &quot;&quot;&quot;tuple_algorithms.hpp zip2_by: ((A,a),((B,b),(C,c)),d) by (X,(X,X)) -&gt; ((A,(B,C)),(a,(b,c),d)).&quot;&quot;&quot;
+    if is_tuple(guide):
+        split = [zip2_by(t[i], guide[i]) for i in range(len(guide))]
+        return (tuple(s[0] for s in split), tuple(s[1] for s in split) + tuple(t[len(guide):]))
+    if not (is_tuple(t) and len(t) == 2):
+        raise ValueError(&quot;zip2_by needs a rank-2 mode at each guide terminal&quot;)
+    return t
+# ---------------------------------------------------------------- end shared core---------------
+
+def logical_divide(layout: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;logical_divide(A, B) -&gt; ((tile), (rest)) per the rules in the module docstring.&quot;&quot;&quot;
+    if isinstance(tiler, Layout):
+        # complement(B, |A|) 列出 B 没碰到的那些位置的“步长结构”：先在 tile 内走（B），走完一个 tile
+        # 再按 complement 跳到下一个 tile。make_layout(B, B*) 是一个覆盖 [0, |A|) 的双射，
+        # 再用 A 复合，就把“逻辑上第 i 个元素”映射回 A 的物理位置。
+        # cotarget 用 shape(coalesce(A))，不是 size(A)：两者乘积相同，但 tuple 版本的 ceil_div
+        # 在不整除时会逐模式取整（见 core 的 ceil_div），和真实 CuTe 一致。
+        cotarget = coalesce(layout).shape
+        return composition(layout, make_layout(tiler, complement(tiler, cotarget)))
+    if is_tuple(tiler):
+        # 按模式切：transform_layout 会把 A 多出来的模式原样追加（composition 的 by-mode版本会丢掉它们）。
+        return transform_layout(layout, tiler, lambda l, t: logical_divide(l, t))
+    if is_underscore(tiler):
+        return layout
+    return logical_divide(layout, Layout(tiler, 1))
+
+
+def _tile_unzip(layout: Layout, tiler) -&gt; Layout:
+    # zip2_by 只在 tiler 是 tuple 时重排；tiler 是单个 Layout/int 时 logical_divide 已经是 (tile, rest)。
+    guide = _guide(tiler)
+    return Layout(zip2_by(layout.shape, guide), zip2_by(layout.stride, guide))
+
+
+def _guide(tiler):
+    if is_tuple(tiler):
+        if any(is_underscore(t) for t in _flatten_tiler(tiler)):
+            raise ValueError(&quot;zipped_divide: tiler contains _, no (tile, rest) pair to zip&quot;)
+        return tuple(_guide(t) for t in tiler)
+    if is_underscore(tiler):
+        raise ValueError(&quot;zipped_divide: tiler contains _, no (tile, rest) pair tozip&quot;)
+    return 0
+
+
+def _flatten_tiler(tiler):
+    &quot;&quot;&quot;Leaves of a tiler tuple (Layouts, ints and _ are leaves).&quot;&quot;&quot;
+    if is_tuple(tiler):
+        out = []
+        for t in tiler:
+            out += _flatten_tiler(t)
+        return out
+    return [tiler]
+
+
+def zipped_divide(layout: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;((tile_0, tile_1, ...), (rest_0, rest_1, ..., extra modes)).&quot;&quot;&quot;
+    return _tile_unzip(logical_divide(layout, tiler), tiler)
+
+
+
+def logical_product(block: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;(block, complement(block) o tiler); by-mode for tuple tilers.&quot;&quot;&quot;
+    if isinstance(tiler, Layout):
+        # complement(block) 描述“block 之外”的位置：先填 block 的空洞，再越过 block 往后走。
+        # 用 tiler 去复合它，就得到“第 k 份 block 的起点”。拼起来：(block 内, 第几份)。
+        return make_layout(block, composition(complement(block), tiler))
+    if is_tuple(tiler):
+        return transform_layout(block, tiler, lambda l, t: logical_product(l, t))
+    if is_underscore(tiler):
+        return block
+    return logical_product(block, Layout(tiler, 1))
+
+
+
+def append_rank(layout: Layout, R: int) -&gt; Layout:
+    &quot;&quot;&quot;append&lt;R&gt;(layout): pad with 1:0 modes up to rank R.&quot;&quot;&quot;
+    r = layout.rank()
+    if r &gt;= R:
+        return layout
+    s = layout.shape if is_tuple(layout.shape) else (layout.shape,)
+    d = layout.stride if is_tuple(layout.stride) else (layout.stride,)
+    return Layout(s + (1,) * (R - r), d + (0,) * (R - r))
+
+
+def _rank_matched_product(block: Layout, tiler: Layout) -&gt; Layout:
+    R = max(block.rank(), tiler.rank())
+    # 整体 product（tiler 是一个 Layout，不是 tuple），再按维度配对。补的 1:0 模式让 rank 不同的
+    # block 和 tiler 也能逐维配对（见 golden 里 blocked_4_2x3 的 (_1,_3):(_0,_8)）。
+    return logical_product(append_rank(block, R), append_rank(tiler, R))
+
+
+def blocked_product(block: Layout, tiler: Layout) -&gt; Layout:
+    &quot;&quot;&quot;zip(block, tiles): each dimension becomes (block_i, tile_i) — whole blocks side by side.&quot;&quot;&quot;
+    p = _rank_matched_product(block, tiler)
+    b, t = p.mode(0), p.mode(1)
+    return Layout(zip_tuples(b.shape, t.shape), zip_tuples(b.stride, t.stride))
+
+
+def raked_product(block: Layout, tiler: Layout) -&gt; Layout:
+    &quot;&quot;&quot;zip(tiles, block): each dimension becomes (tile_i, block_i) — blocks interleaved.&quot;&quot;&quot;
+    p = _rank_matched_product(block, tiler)
+    b, t = p.mode(0), p.mode(1)
+    return Layout(zip_tuples(t.shape, b.shape), zip_tuples(t.stride, b.stride))
+
+
+
+def right_inverse(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;CuTe right_inverse: R with layout(R(i)) == i for every i &lt; size(R).&quot;&quot;&quot;
+    c = coalesce(layout)
+    lst = list(c.stride) if is_tuple(c.stride) else [c.stride]
+    lsh = list(c.shape) if is_tuple(c.shape) else [c.shape]
+    pre = [1]
+    for s in lsh:
+        pre.append(pre[-1] * s)
+    order = sorted(range(len(lst)), key=lambda i: lst[i])
+    rs, rd, curr = [1], [0], 1
+    for i in order:
+        if lst[i] == curr:
+            rs.append(lsh[i])
+            rd.append(pre[i])
+            curr = lsh[i] * lst[i]
+    return coalesce(Layout(tuple(rs), tuple(rd)))
+
+
+def with_shape(layout: Layout, shape) -&gt; Layout:
+    &quot;&quot;&quot;Layout::with_shape(shape) == composition(layout, make_layout(shape)).&quot;&quot;&quot;
+    return composition(layout, Layout(shape))
+
+
+def swizzle(B: int, M: int, S: int, x: int) -&gt; int:
+    &quot;&quot;&quot;CuTe Swizzle&lt;B,M,S&gt; (S &gt;= 0 here): XOR bits [M+S, M+S+B) down onto bits [M,M+B).&quot;&quot;&quot;
+    mask = ((1 &lt;&lt; B) - 1) &lt;&lt; (M + S)
+    return x ^ ((x &amp; mask) &gt;&gt; S)
+
+
+class Swizzled:
+    &quot;&quot;&quot;composition(Swizzle&lt;B,M,S&gt;, base) — the swizzled SMEM layout.&quot;&quot;&quot;
+
+    def __init__(self, B: int, M: int, S: int, base: Layout):
+        self.B, self.M, self.S, self.base = B, M, S, base
+
+    def __call__(self, i):
+        return swizzle(self.B, self.M, self.S, self.base(i))
+
+    def size(self):
+        return self.base.size()
+
+    def __repr__(self):
+        return f&quot;Sw&lt;{self.B},{self.M},{self.S}&gt; o _0 o {self.base!r}&quot;
+
+
+# ---------------------------------------------------------------- B2: your code ----------------
+
+def _plain_common(a: Layout, b: Layout):
+    inv = right_inverse(b)
+    common = coalesce(composition(a, inv))
+    m0 = common.mode(0) if is_tuple(common.shape) else common
+    return inv, m0
+
+
+def max_common_vector(a, b) -&gt; int:
+    sa, sb = isinstance(a, Swizzled), isinstance(b, Swizzled)
+    if sa and sb:
+        v = max_common_vector(a.base, b.base)
+        if (a.B, a.M, a.S) == (b.B, b.M, b.S):
+            return v
+        return min(v, 1 &lt;&lt; a.M, 1 &lt;&lt; b.M)
+    if sa or sb:
+        sw = a if sa else b
+        other = b if sa else a
+        # swizzle 只改写第 M 位以上的位：前 2^M 个连续元素一定还连续，再长就不保证了。
+        return min(max_common_vector(sw.base, other), 1 &lt;&lt; sw.M)
+    _, m0 = _plain_common(a, b)
+    return m0.shape if m0.stride == 1 else 1
+
+
+def max_common_layout(a, b) -&gt; Layout:
+    if isinstance(a, Swizzled) or isinstance(b, Swizzled):
+        sw = a if isinstance(a, Swizzled) else b
+        other = b if sw is a else a
+        common = max_common_layout(sw.base, other)
+        base = 1 &lt;&lt; sw.M
+        return composition(common, Layout(base)) if base &lt; common.size() else common
+    inv, m0 = _plain_common(a, b)
+    return composition(inv, m0) if m0.stride == 1 else Layout(1, 0)
+
+
+def brute_vector(a, b, size: int) -&gt; int:
+    where = {b(i): i for i in range(size)}
+    best, n = 1, 2
+    while n &lt;= size and size % n == 0:
+        ok = True
+        for i in range(size):
+            if b(i) % n:
+                continue
+            if a(i) % n:
+                ok = False
+                break
+            for j in range(1, n):
+                k = where.get(b(i) + j)
+                if k is None or a(k) != a(i) + j:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if not ok:
+            break
+        best, n = n, n * 2
+    return best
+
+
+def vector_bytes(n_elems: int, elem_bytes: int = 2, cap: int = 16) -&gt; int:
+    total = n_elems * elem_bytes
+    b = 1
+    while b * 2 &lt;= cap and total % (b * 2) == 0:
+        b *= 2
+    return b
+
+
+def alignment_bytes(byte_offsets, cap: int = 16) -&gt; int:
+    b = cap
+    for off in byte_offsets:
+        while b &gt; 1 and off % b:
+            b //= 2
+    return b
+
+
+_UNIVERSAL = {2: &quot;uint16_t&quot;, 4: &quot;uint32_t&quot;, 8: &quot;uint64_t&quot;, 16: &quot;uint128_t&quot;}
+
+
+def copy_atom(nbytes: int, async_: bool = False) -&gt; str:
+    if not async_:
+        if nbytes not in _UNIVERSAL:
+            raise ValueError(f&quot;no UniversalCopy for {nbytes} bytes&quot;)
+        return f&quot;UniversalCopy&lt;{_UNIVERSAL[nbytes]}&gt;&quot;
+    # cp.async 只有 4/8/16 字节三种（copy_sm80.hpp 的 static_assert）；.cg 版本（CACHEGLOBAL）只允许 16 字节。
+    if nbytes in (4, 8, 16):
+        return f&quot;SM80_CP_ASYNC_CACHEALWAYS&lt;{_UNIVERSAL[nbytes]}&gt;&quot;
+    raise ValueError(f&quot;cp.async moves 4, 8 or 16 bytes, not {nbytes}&quot;)
+
+
+def max_alignment(layout) -&gt; int:
+    if isinstance(layout, Swizzled):
+        return gcd(1 &lt;&lt; layout.M, max_alignment(layout.base))
+    f = coalesce(layout)
+    p = logical_divide(f, right_inverse(f))
+    # right_inverse 覆盖的是“从 0 开始连续”的那一段；第 1 个模式的 stride 是下一段的起点，
+    # 两者的 gcd 就是任何一段的起点都能保证的对齐。padding (18,1)：段长 16、下一段起点 18 →2。
+    d1 = p.mode(1).stride
+    if is_tuple(d1):
+        d1 = flatten(d1)[0]
+    return gcd(product(p.mode(0).shape), d1)
+
+
+def auto_vector_bits(a, b, elem_bits: int = 16, max_vec_bits: int = 128) -&gt; int:
+    mcv = max_common_vector(a, b)
+    if mcv &lt;= 1:
+        return elem_bits
+    align = gcd(gcd(max_alignment(a) * elem_bits, max_alignment(b) * elem_bits), max_vec_bits)
+    return gcd(mcv * elem_bits, align)
+
+
+def copy_plan(a, b, vals_per_thread: int, elem_bits: int = 16, base_offsets_bytes=(0,), async_: bool = False):
+    eb = elem_bits // 8
+    mcv = max_common_vector(a, b)
+    nbytes = min(auto_vector_bits(a, b, elem_bits) // 8, vector_bytes(vals_per_thread, eb),
+                 alignment_bytes(base_offsets_bytes))
+    return {&quot;mcv&quot;: mcv, &quot;vec&quot;: nbytes // eb, &quot;bytes&quot;: nbytes, &quot;atom&quot;: copy_atom(nbytes, async_)}</code></pre></div></div></details>
+<h2 id="b2-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>不带 atom 的 <code>copy(src, dst)</code> 对静态 layout 假定 128 位对齐，对动态 layout 只假定 8 位（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/algorithm/copy.hpp#L247">copy.hpp</a>）：为什么动态 stride 的 tensor 默认几乎不向量化？<code>copy_aligned</code> 改变了什么？</li>
+<li><code>cp.async.cg</code>（<code>SM80_CP_ASYNC_CACHEGLOBAL</code>）只允许 16 字节，<code>.ca</code> 允许 4/8/16（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm80.hpp">copy_sm80.hpp</a>）。什么时候应该绕过 L1？</li>
+<li>K = 60 时 gmem 行起点 120·r 字节只有 8 字节对齐，本题的 <code>copy_plan</code> 把 16 字节 <code>cp.async</code> 降成 8 字节。如果 K 是运行时参数（动态 stride），layout 就看不到它了：CUTLASS 的 <code>AlignmentA</code> 模板参数在替你承诺什么？</li>
+<li>把 B 换成 MN-major（列主序）存放时，smem 应该选哪种 layout atom 才能保持 16 字节 copy？对照 SM80 的 <code>SM80_CP_ASYNC_CACHEALWAYS</code> + <code>Swizzle&lt;3,3,3&gt;</code> 的组合。</li>
+</ul>
+
+<nav class="pager"><a href="b1_algebra_rewrite.html">← 上一题 B1</a><a href="c1_static_folding.html">C1 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#b2-1">题面速览</a>
+<a class="o2" href="#b2-2">直觉与类比</a>
+<a class="o2" href="#b2-3">图解：从两个 layout 到一条指令</a>
+<a class="o2" href="#b2-4">逐步演示</a>
+<a class="o2" href="#b2-5">易错点</a>
+<a class="o2" href="#b2-6">对照文档</a>
+<a class="o2" href="#b2-7">上机验证</a>
+<a class="o2" href="#b2-8">三级提示</a>
+<a class="o2" href="#b2-9">参考解</a>
+<a class="o2" href="#b2-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B1 · 用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3 cur" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">B1 · Track B · 用 Layout Algebra 重新表达 · 60 分钟 · 难</div><h1>B1 · 用 Layout Algebra 重写 Track A：zipped_divide、raked_product + right_inverse、Swizzle ∘ Layout</h1><p class="lede">Track A 用手写公式回答了“CTA 拿哪块、线程搬哪些、SMEM 放哪里”。CuTe 不写这些公式，而是用 Layout Algebra 把它们构造出来：local_tile 是 zipped_divide 加切片，Copy TV 是 raked_product 的 right_inverse，SMEM 是 Swizzle 和普通 layout 的 composition。本题用和真实 CuTe 逐字符一致的 Python 代数写出这三个构造，并证明它们和 Track A 的手写公式是同一个函数。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/b1_algebra_rewrite.py"><code>mine/b1_algebra_rewrite.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_b1_algebra_rewrite.py"><code>tests/test_b1_algebra_rewrite.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/b1_algebra_rewrite.py"><code>solutions/b1_algebra_rewrite.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="B1"> 我已完成这道题</label></header>
+<h2 id="b1-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/algebra_compile.html">Layout Algebra 与编译</a> 的代数操作表。</li>
+<li><strong>在体系里的位置</strong>：
+<ul>
+<li><code>local_tile</code> 的定义就是 <code>zipped_divide</code> 再切片（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1037">local_tile</a>、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1650">zipped_divide</a>）。</li>
+<li><code>make_tiled_copy</code> 的前三行：<code>layout_mn = raked_product(thr_layout, val_layout)</code>，<code>layout_tv = right_inverse(layout_mn).with_shape(...)</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L495">make_tiled_copy</a>、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1792">raked_product</a>、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1305">right_inverse</a>）。</li>
+<li>swizzle 过的 SMEM layout 是 <code>composition(Swizzle&lt;2,2,2&gt;{}, layout)</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">Swizzle</a>）。</li>
+</ul>
+</li>
+<li><strong>你要实现</strong>：<code>local_tile_view</code>、<code>tile_map</code>、<code>hand_local_tile</code>、<code>make_layout_tv</code>、<code>tv_coord</code>、<code>owner</code>、<code>hand_copy_coord</code>、<code>smem_layout_map</code>、<code>hand_smem_offset</code>、<code>same_function</code>。整套 Python CuTe 代数（<code>Layout</code>、<code>composition</code>、<code>complement</code>、<code>coalesce</code>、<code>zipped_divide</code>、<code>raked_product</code>、<code>right_inverse</code>、<code>with_shape</code>、<code>swizzle</code> …）已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li><code>zipped_divide(gA, (32,16)) = ((tile), (rest))</code>：第 0 个模式是 tile 内，第 1 个模式是“第几个 tile”。切片 <code>(_, coord)</code> 得到 tile 的 layout 和一个常数偏移 <code>rest(coord)</code>。</li>
+<li><code>raked_product(thr, val)</code> 的定义域是 tile 坐标 (m, k)，值是 TV 下标 <code>t + 128·v</code>；它的 <code>right_inverse</code> 才是 (t, v) → tile 坐标。</li>
+<li><code>with_shape(L, s) = composition(L, Layout(s))</code>：只改定义域的形状，不改函数。</li>
+<li>tile 坐标的一维偏移按 colex：<code>m + 32·k</code>。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：given 的代数核心在 8 个表达式上和真实 CuTe 的打印逐字符相同（这几条从一开始就通过）· <code>(1,2)</code> 的 tile layout 与偏移和真实 <code>local_tile</code> 相同 · 8 个 (bm, k) 的偏移与真实 rest 模式相同 · 代数版与手写公式相同 · 8 个视图恰好覆盖 A 一次 · 四种 thr/val 的 <code>layout_mn</code>、<code>layout_tv</code>、tiler 与真实 CuTe 逐字符相同，取值表相同 · <code>layout_mn ∘ layout_tv</code> 是恒等 · <code>tv_coord</code> 与手写 <code>(t//4, 4(t%4)+v)</code> 是同一个函数 · <code>owner</code> 是 copy 的逆 · SMEM 映射与真实 <code>Sw&lt;2,2,2&gt; o _0 o (_32,_16):(_16,_1)</code> 相同 · 手写位运算与之相同 · <code>same_function</code> 能发现差异。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>zipped_divide</strong>：<code>logical_divide</code> 之后把各维的“tile 内”模式拼成第 0 个模式、“tile 编号”模式拼成第 1 个模式。</li>
+<li><strong>raked_product</strong>：把 val 的每一维插到 thr 对应维的内侧，线程和值交错排列（rake = 耙子：齿和齿之间有空隙）。</li>
+<li><strong>right_inverse(L)</strong>：满足 <code>L(R(i)) = i</code> 的 layout，CuTe 通过对 stride 排序构造它。</li>
+<li><strong>ComposedLayout</strong>：<code>Sw&lt;2,2,2&gt; o _0 o L</code> 读作“先算 L，加偏移 0，再做 swizzle”。</li>
+</ul>
+</div>
+<h2 id="b1-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 同一份座位表的三种写法</div><p>Track A 像是手写了一份音乐会的座位表：“第 5 排第 3 座给谁”。代数的写法是给出生成规则：“把大厅按 32×16 的区块切开”（divide）、“每 4 个连号座位给一个人，人沿着排先坐满”（raked_product 再取逆）、“每排的座位号按排号的两位打乱”（composition 一个 swizzle）。生成规则可以和别的规则拼接、化简、编译期检查；而同一个大厅、同一批人，两种写法得到的座位表必须一模一样，这一题就是在逐个座位核对。</p>
+</div>
+<h2 id="b1-3">图解：三个构造</h2>
+
+<figure class="flow"><div class="flow-head">Track A 的手写公式 ↔ CuTe 的代数构造<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;Track A 的手写公式 ↔ CuTe 的代数构造&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;h1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;CTA tile 偏移&quot;, &quot;s&quot;: &quot;(32bm+r)·64 + 16k + c&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a1&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;zipped_divide + 切片&quot;, &quot;s&quot;: &quot;((32,16),(2,4))&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h2&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;Copy TV&quot;, &quot;s&quot;: &quot;(t//4, 4(t%4)+v)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a2&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;right_inverse(raked)&quot;, &quot;s&quot;: &quot;((4,32),4):((128,1),32)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h3&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 2.0, &quot;t&quot;: &quot;SMEM 偏移&quot;, &quot;s&quot;: &quot;16r+c，异或 [4,6)→[2,4)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a3&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 2.0, &quot;t&quot;: &quot;Swizzle ∘ Layout&quot;, &quot;s&quot;: &quot;Sw&lt;2,2,2&gt; o (32,16)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;h1&quot;, &quot;b&quot;: &quot;a1&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;h2&quot;, &quot;b&quot;: &quot;a2&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;h3&quot;, &quot;b&quot;: &quot;a3&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 360.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 230.0}}"></div><figcaption>右边三个都是真实 CuTe 打印出来的 layout；左边是 A1–A3 手写的公式。测试在每个定义域点上检查两边相等。</figcaption></figure>
+<h2 id="b1-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ make_tiled_copy 的三行：thr = (32,4):(4,1)，val = (1,4)</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;rp&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;raked_product&quot;, &quot;s&quot;: &quot;(m,k) → t+128v&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ri&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;right_inverse&quot;, &quot;s&quot;: &quot;(_4,_128):(_128,_1)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ws&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;with_shape&quot;, &quot;s&quot;: &quot;(128, 4)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;q&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;tv_coord / owner&quot;, &quot;s&quot;: &quot;两个方向都能查&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;rp&quot;, &quot;b&quot;: &quot;ri&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ri&quot;, &quot;b&quot;: &quot;ws&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ws&quot;, &quot;b&quot;: &quot;q&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="rp"><div class="step-title">1. raked_product</div><p><code>layout_mn = ((_1,_32),(_4,_4)):((_0,_4),(_128,_1))</code>，和真实 CuTe 相同。读法：m 方向 <code>(1,32)</code>，val 的 1 在内侧、thr 的 32 在外侧（stride 4，线程号 +4）；k 方向 <code>(4,4)</code>，val 的 4 在内侧（stride 128 = 下一个值）、thr 的 4 在外侧（stride 1 = 下一个线程）。tiler 是每个模式的 size：(32, 16)。<code>layout_mn(31, 15) = 511</code>，即 (t, v) = (127, 3)。</p>
+</div><div class="step" data-hl="rp,ri"><div class="step-title">2. 取逆</div><p><code>right_inverse(layout_mn) = (_4,_128):(_128,_1)</code>：把 stride 排序（1, 4, 128）后反过来写。它满足 <code>layout_mn(R(i)) = i</code>，测试 <code>test_layout_tv_is_right_inverse_of_layout_mn</code> 对全部 512 个 i 检查。</p>
+</div><div class="step" data-hl="ri,ws"><div class="step-title">3. 改形状</div><p><code>with_shape(R, (128, 4)) = ((_4,_32),_4):((_128,_1),_32)</code>。线程模式 <code>(4,32):(128,1)</code>：线程号的低 2 位乘 128（列 4(t%4)，乘 tile 高度 32），高 5 位乘 1（行 t//4）。真实 <code>get_layoutS_TV</code> 是 <code>((_4,_32),(_4,_1)):((_128,_1),(_32,_0))</code>，多一个 size 1 的模式，作为函数完全相同。</p>
+</div><div class="step" data-hl="ws,q"><div class="step-title">4. 两个方向都能查</div><p><code>layout_tv(5, 2) = 193</code>，<code>193 % 32 = 1</code>、<code>193 // 32 = 6</code>：线程 5 的第 2 个值是 tile 的 (1, 6)，和手写 <code>(5 // 4, 4·(5 % 4) + 2)</code> 一致。反过来 <code>owner(layout_mn, 31, 15) = (127, 3)</code>。</p>
+</div></div></div>
+<h2 id="b1-5">易错点</h2>
+<ul>
+<li><strong>把 zipped_divide 的 rest 偏移当成 tile 编号。</strong> 切片之后剩下的是 <code>rest(coord)</code> 这个元素偏移：<code>(1, 2) → 2048 + 32 = 2080</code>，不是 <code>1·4 + 2</code>。测试 <code>test_local_tile_view_is_zipped_divide_then_slice</code>。</li>
+<li><strong>把 raked_product 当成 TV layout。</strong> 它的定义域是 tile 坐标，方向是反的；直接拿来当 (t, v) → 坐标，线程 5 会得到错位的结果。测试 <code>test_make_layout_tv_matches_cute</code>。</li>
+<li><strong>with_shape 写成新 <code>Layout(shape, stride)</code>。</strong> <code>with_shape</code> 是 composition，stride 由代数算出来，不能手填。</li>
+<li><strong>tile 偏移按行主序解码。</strong> <code>layout_tv</code> 的值是 colex 偏移 <code>m + 32·k</code>。测试 <code>test_algebraic_copy_tv_equals_hand_formula</code>。</li>
+<li><strong>swizzle 异或的方向写反。</strong> 是把第 [4,6) 位异或到第 [2,4) 位：<code>(1, 0) → 20</code>。测试 <code>test_algebraic_smem_equals_hand_formula</code>。</li>
+</ul>
+<h2 id="b1-6">对照文档</h2>
+<blockquote>
+<p>“因为一个高性能 kernel 中，数据要经过很多次‘重新观察’……若每一步都手写索引公式，代码会脆弱、重复，而且很难证明没有漏元素或冲突。Layout Algebra 的作用是把‘映射与映射之间的关系’变成可组合的运算。”</p>
+</blockquote>
+<p>本题把这几句话变成了可以运行的等式：同一个映射，手写一遍、代数构造一遍，在整个定义域上逐点相等；<code>test_local_tile_views_tile_A_exactly_once</code> 就是文档说的“证明没有漏元素”。</p>
+<h2 id="b1-7">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/b1_algebra_rewrite.cpp   # 真实 CuTe，本机编译运行
+./check.sh oracle b1                                  # 重新生成 tests/golden/b1_algebra_rewrite.json
+</code></pre>
+<p>本机的真实输出：</p>
+<pre><code class="language-text">zipped_divide(gA, (32,16)) = ((_32,_16),(_2,_4)):((_64,_1),(_2048,_16))
+rest mode at (1,2) = 2080   (the tile origin of CTA row 1, k-tile 2)
+raked_product(thr, val)   = ((_1,_32),(_4,_4)):((_0,_4),(_128,_1))
+right_inverse(...)         = (_4,_128):(_128,_1)
+layout_tv                  = ((_4,_32),_4):((_128,_1),_32)
+tv(5, 0..3) = 129 161 193 225  (column-major index m + 32k in the 32x16 tile)
+smem                       = Sw&lt;2,2,2&gt; o _0 o (_32,_16):(_16,_1)
+</code></pre>
+<p>given 的 Python 代数核心（<code>Layout</code>、<code>composition</code>、<code>zipped_divide</code>…）也在 golden 里校验过：<code>test_given_core_matches_cute_printouts</code> 对 8 个表达式比较真实 CuTe 的打印字符串，从一开始就会通过。</p>
+<h2 id="b1-8">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">gA = Layout((64, 64), (64, 1))
+zipped_divide(gA, (32, 16))                   # ((_32,_16),(_2,_4)):((_64,_1),(_2048,_16))
+local_tile_view(gA, (32, 16), (1, 2))         # ((_32,_16):(_64,_1), 2080)
+mn, tv, tiler = make_layout_tv(Layout((32, 4), (4, 1)), Layout((1, 4)))
+tiler                                         # (32, 16)
+tv_coord(tv, tiler, 5, 2)                     # (1, 6)
+owner(mn, 31, 15)                             # (127, 3)
+smem_layout_map((2, 2, 2), Layout((32, 16), (16, 1)))[1]    # 20（下标 1 = 坐标 (1, 0)）
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li><code>zipped_divide</code> 结果第 1 个模式的 stride <code>(2048, 16)</code> 分别是什么意思？</li>
+<li>为什么 <code>make_tiled_copy</code> 先算 <code>raked_product</code> 再取逆，而不是直接写 TV？</li>
+<li><code>layout_tv</code> 和真实 <code>get_layoutS_TV</code> 打印不同，为什么测试仍然认为它们相同？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>local_tile_view</code>：<code>z = zipped_divide(gA, tiler)</code>；返回 <code>(z.mode(0), z.mode(1)(coord))</code>。</li>
+<li><code>tile_map</code>：<code>[offset + L(i) for i in range(L.size())]</code>。</li>
+<li><code>make_layout_tv</code>：三行，正好对应 <code>make_tiled_copy</code> 的源码；tiler 是 <code>layout_mn.shape</code> 每个模式的乘积。</li>
+<li><code>tv_coord</code>：<code>off = layout_tv((t, v))</code>，返回 <code>(off % tiler[0], off // tiler[0])</code>。</li>
+<li><code>owner</code>：<code>i = layout_mn((m, k))</code>，<code>T</code> 是线程数（可以从 <code>layout_mn.shape</code> 里 thr 的部分读出来），返回 <code>(i % T, i // T)</code>。</li>
+<li><code>smem_layout_map</code>：对 <code>base(i)</code> 逐个调 <code>swizzle(B, M, S, ·)</code>。</li>
+<li><code>same_function</code>：<code>all(f(x) == g(x) for x in domain)</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>rest 模式 (2, 4) 是 (tile 行号 bm, K tile 号 k)。stride 2048 = 32 行 × 64：下一个 CTA 行从第 32 行开始；stride 16：下一个 K tile 在同一行往右 16 个元素。</li>
+<li>“每线程拿 4 个连续值、线程按某种顺序排开”是在 tile 坐标空间里最容易描述的（这就是 product：把 val 这个小块按 thr 复制）。但硬件需要的是反方向：“第 t 个线程第 v 个值在哪”。<code>right_inverse</code> 把容易写的方向自动翻成需要的方向，并且在编译期就验证它是双射。</li>
+<li>真实版本多了一个 size 1 的模式 <code>(_4,_1):(_32,_0)</code>，它不改变任何点的值。测试比较的是函数值（512 个点），而不是打印字符串。</li>
+</ol>
+</div></details></div></details>
+<h2 id="b1-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/b1_algebra_rewrite.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/b1_algebra_rewrite.py</span><span class="muted small">657 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;B1 · 用 Layout Algebra 重新表达 Track A 的三个映射：local_tile、Copy TV、SMEM swizzle — reference solution.
+
+Track A 里我们用手写公式回答了“CTA 拿哪块”“线程搬哪些元素”“SMEM 放在哪里”。CuTe 不写这些公式，而是用
+代数操作把它们**构造**出来（文档第 5 节“为什么 CuTe 需要 Layout Algebra”）：
+    local_tile   ≡ zipped_divide(gA, tiler) 再用 (_, cta_coord) 切片            （tensor_impl.hpp local_tile）
+    Copy TV      ≡ right_inverse(raked_product(thr, val)).with_shape(|thr|, |val|)（copy_atom.hpp make_tiled_copy）
+    SMEM layout  ≡ composition(Swizzle&lt;2,2,2&gt;, (32,16):(16,1))（swizzle_layout.hpp）
+这一题用 given 的 Python CuTe 代数（打印结果和真实 CuTe 逐字符一致，tests 里用 golden 校验）写出这三个构造，
+再证明它们和手写公式是同一个函数。期望结果来自 oracle/b1_algebra_rewrite.cpp（真实 CuTe）。
+
+配置
+- A：(M, K) = (64, 64)，K 连续：gA = (64,64):(64,1)。CTA tiler (BM, BK) = (32, 16)。
+- Copy：thr = (32,4):(4,1)，val = (1,4)（compact：(_1,_4):(_0,_1)）。
+- SMEM：Swizzle&lt;2,2,2&gt; ∘ (32,16):(16,1)；swizzle(B, M, S, x) 是 given。
+
+API（Layout、zipped_divide、raked_product、right_inverse、with_shape、composition、coalesce、swizzle 等都是 given）
+    local_tile_view(gA, tiler, coord) -&gt; (Layout, offset)
+        zipped_divide(gA, tiler) = ((tile), (rest))；返回 (tile 模式的 Layout, rest模式在 coord 处的值)。
+        coord 是 rest 空间里的坐标 (bm, k)。例：coord (1, 2) → ((_32,_16):(_64,_1), 2048 + 32)。
+    tile_map(layout, offset) -&gt; list[int]       offset + layout(i)，i = 0..size-1（视图里每个元素的全局偏移）
+    hand_local_tile(bm, k) -&gt; list[int]         手写公式：tile 内列主序第 i 个元素 (r,c) 的偏移 (32·bm + r)·64 + 16·k + c
+    make_layout_tv(thr, val) -&gt; (layout_mn, layout_tv, tiler)
+        layout_mn = raked_product(thr, val)；layout_tv = with_shape(right_inverse(layout_mn), (|thr|, |val|))；
+        tiler = 每个模式的 size（product_each(shape(layout_mn))），例 (32, 16)。
+    tv_coord(layout_tv, tiler, t, v) -&gt; (m, k)  layout_tv((t, v)) 是 tile 内列主序偏移，解码成 (m, k)
+    owner(layout_mn, m, k) -&gt; (t, v)            layout_mn((m, k)) = t + |thr|·v 的逆用法：谁搬了 (m, k)
+    hand_copy_coord(t, v) -&gt; (m, k)             手写：(t // 4, 4·(t % 4) + v)
+    smem_layout_map(swz, base) -&gt; list[int]     swz = (B, M, S)，base 是 Layout：[swizzle(B,M,S, base(i))]
+    hand_smem_offset(r, c) -&gt; int               手写：16·r + c 再做 Swizzle&lt;2,2,2&gt; 的位运算（第 [4,6) 位异或到 [2,4)）
+    same_function(f, g, domain) -&gt; bool         对 domain 里每个 x 检查 f(x) == g(x)
+&quot;&quot;&quot;
+from __future__ import annotations
+
+def is_tuple(x) -&gt; bool:
+    return isinstance(x, tuple)
+
+
+def flatten(t) -&gt; tuple:
+    &quot;&quot;&quot;(2, (3, 4)) -&gt; (2, 3, 4);  5 -&gt; (5,).&quot;&quot;&quot;
+    if not is_tuple(t):
+        return (t,)
+    out = ()
+    for e in t:
+        out += flatten(e)
+    return out
+
+
+def fmt_tuple(t, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;Format an IntTuple the way cute::print does: (_2,(_3,_4)) for static ints.&quot;&quot;&quot;
+    if is_tuple(t):
+        return &quot;(&quot; + &quot;,&quot;.join(fmt_tuple(e, static) for e in t) + &quot;)&quot;
+    return (&quot;_&quot; if static else &quot;&quot;) + str(t)
+
+
+def fmt_layout(shape, stride, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;cute::print of a Layout: &quot;&lt;shape&gt;:&lt;stride&gt;&quot;.&quot;&quot;&quot;
+    return fmt_tuple(shape, static) + &quot;:&quot; + fmt_tuple(stride, static)
+
+
+def parse_tuple(s: str):
+    &quot;&quot;&quot;Inverse of fmt_tuple. Accepts &#x27;_4&#x27; or &#x27;4&#x27;. &#x27;(_2,(_3,_4))&#x27; -&gt; (2, (3, 4)).&quot;&quot;&quot;
+    s = s.strip()
+    pos = 0
+
+    def parse():
+        nonlocal pos
+        if s[pos] == &quot;(&quot;:
+            pos += 1
+            items = []
+            while s[pos] != &quot;)&quot;:
+                items.append(parse())
+                if s[pos] == &quot;,&quot;:
+                    pos += 1
+            pos += 1
+            return tuple(items)
+        start = pos
+        while pos &lt; len(s) and s[pos] not in &quot;,)&quot;:
+            pos += 1
+        tok = s[start:pos].lstrip(&quot;_&quot;)
+        return int(tok)
+
+    v = parse()
+    if pos != len(s):
+        raise ValueError(f&quot;trailing characters in {s!r}&quot;)
+    return v
+
+
+def parse_layout(s: str):
+    &quot;&quot;&quot;&#x27;(_4,_8):(_8,_1)&#x27; -&gt; ((4, 8), (8, 1)). A swizzled/composed layout is not accepted.&quot;&quot;&quot;
+    shape_s, stride_s = _split_top_colon(s.strip())
+    return parse_tuple(shape_s), parse_tuple(stride_s)
+
+
+def _split_top_colon(s: str):
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == &quot;(&quot;:
+            depth += 1
+        elif ch == &quot;)&quot;:
+            depth -= 1
+        elif ch == &quot;:&quot; and depth == 0:
+            return s[:i], s[i + 1:]
+    raise ValueError(f&quot;no top-level &#x27;:&#x27; in {s!r}&quot;)
+
+# ---------------------------------------------------------------- shared core (given) -----------
+# Static-integer mirror of CuTe&#x27;s Layout algebra at the pinned commit (include/cute/layout.hpp).
+from math import prod as _mprod
+
+
+class Underscore:
+    &quot;&quot;&quot;CuTe&#x27;s `_` (also spelled X in Step&lt;...&gt;): keep this mode when slicing; drop it when dicing.&quot;&quot;&quot;
+
+    def __repr__(self):
+        return &quot;_&quot;
+
+
+_ = Underscore()
+X = _
+
+
+def is_underscore(x) -&gt; bool:
+    return isinstance(x, Underscore)
+
+
+def product(t) -&gt; int:
+    &quot;&quot;&quot;Product of all leaves of an IntTuple.&quot;&quot;&quot;
+    return _mprod(flatten(t))
+
+
+def rank(t) -&gt; int:
+    return len(t) if is_tuple(t) else 1
+
+
+def get(t, i):
+    &quot;&quot;&quot;get&lt;i&gt;(t); get&lt;0&gt; of a non-tuple is the value itself (CuTe convention).&quot;&quot;&quot;
+    if is_tuple(t):
+        return t[i]
+    if i != 0:
+        raise IndexError(i)
+    return t
+
+
+def unwrap(t):
+    while is_tuple(t) and len(t) == 1:
+        t = t[0]
+    return t
+
+
+def ceil_div(a, b):
+    &quot;&quot;&quot;cute::ceil_div on IntTuples (int_tuple.hpp).&quot;&quot;&quot;
+    if is_tuple(a):
+        if is_tuple(b):
+            b = tuple(b) + (1,) * (len(a) - len(b))
+            return tuple(ceil_div(x, y) for x, y in zip(a, b))
+        out, rest = (), b
+        for ai in a:
+            out += (ceil_div(ai, rest),)
+            rest = ceil_div(rest, ai)
+        return out
+    if is_tuple(b):
+        return ceil_div(a, product(b))
+    return (a + b - 1) // b
+
+
+def crd2idx(coord, shape, stride):
+    &quot;&quot;&quot;stride.hpp crd2idx(c, s, d). An int coord on a tuple shape is split colexicographically and
+    the LAST mode absorbs the remainder (so indices past size() extend the last mode).
+    Underscore coordinates count as 0 (this is the offset used when slicing).&quot;&quot;&quot;
+    if is_underscore(coord):
+        return 0
+    if is_tuple(coord):
+        if not is_tuple(shape) or len(coord) != len(shape):
+            raise ValueError(&quot;mismatched ranks&quot;)
+        return sum(crd2idx(c, s, d) for c, s, d in zip(coord, shape, stride))
+    if is_tuple(shape):
+        total, c = 0, coord
+        for k, (s, d) in enumerate(zip(shape, stride)):
+            if k == len(shape) - 1:
+                total += crd2idx(c, s, d)
+            else:
+                c, m = divmod(c, product(s))
+                total += crd2idx(m, s, d)
+        return total
+    return coord * stride
+
+
+def idx2crd(idx, shape, stride):
+    &quot;&quot;&quot;stride.hpp idx2crd(i, s, d): (i // d) % s per leaf (inverse of a compact layout).&quot;&quot;&quot;
+    if is_tuple(shape):
+        return tuple(idx2crd(idx, s, d) for s, d in zip(shape, stride))
+    if shape == 1:          # size-1 mode: coordinate is 0 (skips a possible stride-0 division)
+        return 0
+    return (idx // stride) % shape
+
+
+def crd2crd_1d(coord, shape):
+    &quot;&quot;&quot;Colexicographic 1-D index of a coordinate inside one mode&#x27;s shape (crd2idx(c, s)).&quot;&quot;&quot;
+    if not is_tuple(coord):
+        return coord
+    fc, fs = flatten(coord), flatten(shape)
+    i = 0
+    for c, s in zip(reversed(fc), reversed(fs)):
+        i = i * s + c
+    return i
+
+
+class Layout:
+    &quot;&quot;&quot;A CuTe Layout (Shape, Stride) of static ints. Calling it maps coord/index -&gt;offset.&quot;&quot;&quot;
+
+    def __init__(self, shape, stride=None):
+        if stride is None:
+            stride = _compact_left(shape)
+        self.shape, self.stride = shape, stride
+
+    # -- function view
+    def __call__(self, *c):
+        c = c[0] if len(c) == 1 else tuple(c)
+        if _has_underscore(c):
+            raise TypeError(&quot;use slice_layout(coord, layout) for coordinates containing _&quot;)
+        return crd2idx(c, self.shape, self.stride)
+
+    def size(self) -&gt; int:
+        return product(self.shape)
+
+    def cosize(self) -&gt; int:
+        return self(self.size() - 1) + 1 if self.size() &gt; 0 else 0
+
+    def rank(self) -&gt; int:
+        return rank(self.shape)
+
+    def mode(self, i) -&gt; &quot;Layout&quot;:
+        return Layout(get(self.shape, i), get(self.stride, i))
+
+    def map(self) -&gt; list:
+        &quot;&quot;&quot;[L(0), L(1), ..., L(size-1)]&quot;&quot;&quot;
+        return [self(i) for i in range(self.size())]
+
+    def __eq__(self, other):
+        return isinstance(other, Layout) and (self.shape, self.stride) == (other.shape, other.stride)
+
+    def __hash__(self):
+        return hash((self.shape, self.stride))
+
+    def __repr__(self):
+        return fmt_layout(self.shape, self.stride)
+
+
+def _compact_left(shape, start=1):
+    &quot;&quot;&quot;compact_major&lt;LayoutLeft&gt;: column-major strides for shape, starting at `start`.
+    A size-1 mode gets stride 0 (stride.hpp detail::compact), e.g. (4,1) -&gt; (1,0).&quot;&quot;&quot;
+    if is_tuple(shape):
+        out, cur = [], start
+        for s in shape:
+            out.append(_compact_left(s, cur))
+            cur *= product(s)
+        return tuple(out)
+    return 0 if shape == 1 else start
+
+
+def _has_underscore(c) -&gt; bool:
+    if is_tuple(c):
+        return any(_has_underscore(e) for e in c)
+    return is_underscore(c)
+
+
+def make_layout(*layouts) -&gt; Layout:
+    &quot;&quot;&quot;make_layout(L0, L1, ...): concatenation; ONE argument still wraps: shape (s0,).&quot;&quot;&quot;
+    return Layout(tuple(l.shape for l in layouts), tuple(l.stride for l in layouts))
+
+
+def _as_layout(t) -&gt; Layout:
+    &quot;&quot;&quot;A tiler element that is an int n means the layout n:1 (make_layout(n)).&quot;&quot;&quot;
+    return t if isinstance(t, Layout) else Layout(t, 1 if not is_tuple(t) else _compact_left(t))
+
+
+def _append_mode(shape, stride, s, d):
+    if is_tuple(shape):
+        return shape + (s,), stride + (d,)
+    return (shape, s), (stride, d)
+
+
+def _bw_coalesce(old_shape, old_stride, new_shape, new_stride) -&gt; Layout:
+    &quot;&quot;&quot;layout.hpp detail::bw_coalesce, iterating from the back.&quot;&quot;&quot;
+    for s, d in zip(reversed(old_shape), reversed(old_stride)):
+        if s == 1:
+            continue
+        if new_shape == 1:
+            new_shape, new_stride = s, d
+        elif s * d == get(new_stride, 0):
+            if is_tuple(new_shape):
+                new_shape = (s * new_shape[0],) + new_shape[1:]
+                new_stride = (d,) + new_stride[1:]
+            else:
+                new_shape, new_stride = s * new_shape, d
+        else:
+            if is_tuple(new_shape):
+                new_shape, new_stride = (s,) + new_shape, (d,) + new_stride
+            else:
+                new_shape, new_stride = (s, new_shape), (d, new_stride)
+    if new_shape == 1:
+        return Layout(1, 0)
+    return Layout(new_shape, new_stride)
+
+
+def coalesce(layout: Layout, profile=None) -&gt; Layout:
+    &quot;&quot;&quot;cute::coalesce; with a tuple profile, coalesce each mode separately (transform_layout).&quot;&quot;&quot;
+    if is_tuple(profile):
+        return transform_layout(layout, profile, lambda l, t: coalesce(l, t))
+    fs, fd = flatten(layout.shape), flatten(layout.stride)
+    return _bw_coalesce(fs[:-1], fd[:-1], fs[-1], fd[-1])
+
+
+def coalesce_x(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;detail::coalesce_x: like coalesce but keeps the function correct OUTSIDE the domain too:
+    a terminal size-1 mode starts the fold as shape 2 so its stride survives.&quot;&quot;&quot;
+    fs, fd = flatten(layout.shape), flatten(layout.stride)
+    last = 2 if fs[-1] == 1 else fs[-1]
+    return _bw_coalesce(fs[:-1], fd[:-1], last, fd[-1])
+
+
+def filter_layout(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;cute::filter: replace stride-0 modes by size 1, then coalesce.&quot;&quot;&quot;
+
+    def fz(s, d):
+        if is_tuple(s):
+            return tuple(fz(a, b) for a, b in zip(s, d))
+        return 1 if d == 0 else s
+    return coalesce(Layout(fz(layout.shape, layout.stride), layout.stride))
+
+
+def transform_layout(t0: Layout, t1, f) -&gt; Layout:
+    &quot;&quot;&quot;transform_layout(layout, tuple, f): f on the first min(rank) modes, remaining modes of
+    BOTH appended unchanged (here: the leftover layout modes; leftover tiler modes are invalid).&quot;&quot;&quot;
+    r0, r1 = t0.rank(), len(t1)
+    if r1 &gt; r0:
+        raise ValueError(&quot;too many modes in tiler&quot;)
+    modes = [f(t0.mode(i), t1[i]) for i in range(r1)] + [t0.mode(i) for i in range(r1, r0)]
+    return make_layout(*modes)
+
+
+def _composition_impl(lhs_shape, lhs_stride, rhs_shape, rhs_stride) -&gt; Layout:
+    if is_tuple(rhs_shape):                                  # right-distributivity
+        return make_layout(*[_composition_impl(lhs_shape, lhs_stride, s, d)
+                             for s, d in zip(rhs_shape, rhs_stride)])
+    if rhs_stride == 0:                                      # static stride-0 shortcut
+        return Layout(rhs_shape, rhs_stride)
+    if not is_tuple(lhs_shape):                              # integral lhs
+        return Layout(rhs_shape, rhs_stride * lhs_stride)
+    R = len(lhs_shape)
+    res_s, res_d, rest_s, rest_d = (), (), rhs_shape, rhs_stride
+    for i in range(R - 1):
+        cs, cd = lhs_shape[i], lhs_stride[i]
+        if not (abs(rest_d) % cs == 0 or abs(rest_d) &lt; cs):
+            raise ValueError(&quot;Stride Divisibility Condition&quot;)
+        next_s = ceil_div(cs, abs(rest_d))
+        next_d = ceil_div(abs(rest_d), cs) * (1 if rest_d &gt;= 0 else -1)
+        if next_s == 1 or rest_s == 1:
+            rest_d = next_d
+            continue
+        new_s = min(next_s, rest_s)
+        if rest_s % new_s != 0:
+            raise ValueError(&quot;Shape Divisibility Condition&quot;)
+        res_s, res_d = res_s + (new_s,), res_d + (rest_d * cd,)
+        rest_s, rest_d = rest_s // new_s, next_d
+    if len(res_s) == 0:
+        return Layout(rest_s, rest_d * lhs_stride[R - 1])
+    if rest_s == 1:
+        return Layout(unwrap(res_s), unwrap(res_d))
+    return Layout(res_s + (rest_s,), res_d + (rest_d * lhs_stride[R - 1],))
+
+
+def composition(lhs: Layout, rhs) -&gt; Layout:
+    &quot;&quot;&quot;cute::composition(lhs, rhs). rhs: Layout, int n (== n:1), _ (identity) or a tuple tiler
+    (by-mode; lhs modes NOT hit by the tiler are DROPPED, unlike logical_divide).&quot;&quot;&quot;
+    if isinstance(rhs, Layout):
+        f = coalesce_x(lhs)
+        return _composition_impl(f.shape, f.stride, rhs.shape, rhs.stride)
+    if is_tuple(rhs):
+        if len(rhs) &gt; lhs.rank():
+            raise ValueError(&quot;too many modes in tiler&quot;)
+        return make_layout(*[composition(lhs.mode(i), rhs[i]) for i in range(len(rhs))])
+    if is_underscore(rhs):
+        return lhs
+    f = coalesce_x(lhs)
+    return _composition_impl(f.shape, f.stride, rhs, 1)
+
+
+def _complement_prefix(shape, stride):
+    shape, stride = list(flatten(shape)), list(flatten(stride))
+    R = len(shape)
+    res_s, res_d = [], [1]
+    for _i in range(R - 1):
+        min_d = min(stride)
+        k = stride.index(min_d)
+        new_s = min_d // res_d[-1]
+        if new_s == 0:
+            raise ValueError(&quot;Non-injective Layout detected in complement.&quot;)
+        res_s.append(new_s)
+        res_d.append(min_d * shape[k])
+        del shape[k], stride[k]
+    new_s = stride[0] // res_d[-1]
+    if new_s == 0:
+        raise ValueError(&quot;Non-injective Layout detected in complement.&quot;)
+    res_s.append(new_s)
+    return tuple(res_s), tuple(res_d), stride[0] * shape[0]
+
+
+def complement(layout: Layout, cotarget=None) -&gt; Layout:
+    &quot;&quot;&quot;cute::complement. Without cotarget the result keeps a terminal size-1 mode(..., _1) whose
+    stride defines the complement on the extended domain (pinned-commit semantics).&quot;&quot;&quot;
+    f = filter_layout(layout)
+    fs, fd = f.shape, f.stride
+    if not is_tuple(fd) and fd == 0:                         # irreducible rank-1 stride-0
+        if cotarget is None:
+            return Layout(1, 1)
+        return Layout(product(cotarget), 1)
+    res_s, res_d, new_d = _complement_prefix(fs, fd)
+    if cotarget is None:
+        res = coalesce(Layout(res_s, res_d))
+        if res.size() == 1:
+            return Layout(1, new_d)
+        rs = res.shape if is_tuple(res.shape) else (res.shape,)
+        rd = res.stride if is_tuple(res.stride) else (res.stride,)
+        return Layout(rs + (1,), rd + (new_d,))
+    rest_s = product(ceil_div(cotarget, new_d))              # coalesce(static shape) == product
+    return coalesce(Layout((res_s, rest_s), (res_d, new_d)))
+
+
+def slice_tuple(c, t):
+    &quot;&quot;&quot;underscore.hpp slice(c, t): keep elements of t paired with _ (flattening one level per tuple).&quot;&quot;&quot;
+    if is_tuple(c):
+        out = ()
+        for ci, ti in zip(c, t):
+            out += _lift_slice(ci, ti)
+        return out
+    return t if is_underscore(c) else ()
+
+
+def _lift_slice(c, t):
+    if is_tuple(c):
+        out = ()
+        for ci, ti in zip(c, t):
+            out += _lift_slice(ci, ti)
+        return out
+    return (t,) if is_underscore(c) else ()
+
+
+def slice_layout(c, layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;Layout(c) with underscores: the sub-layout of the _ modes (offset is crd2idx(c) with _ -&gt; 0).&quot;&quot;&quot;
+    return Layout(slice_tuple(c, layout.shape), slice_tuple(c, layout.stride))
+
+
+def zip_tuples(a, b):
+    &quot;&quot;&quot;cute::zip(a, b) on IntTuples: transpose ((a0,a1,...),(b0,b1,...)) -&gt; ((a0,b0),(a1,b1),...);
+    if a is not a tuple the result is ((a, b),).&quot;&quot;&quot;
+    if is_tuple(a):
+        return tuple((x, y) for x, y in zip(a, b))
+    return ((a, b),)
+
+
+def zip2_by(t, guide):
+    &quot;&quot;&quot;tuple_algorithms.hpp zip2_by: ((A,a),((B,b),(C,c)),d) by (X,(X,X)) -&gt; ((A,(B,C)),(a,(b,c),d)).&quot;&quot;&quot;
+    if is_tuple(guide):
+        split = [zip2_by(t[i], guide[i]) for i in range(len(guide))]
+        return (tuple(s[0] for s in split), tuple(s[1] for s in split) + tuple(t[len(guide):]))
+    if not (is_tuple(t) and len(t) == 2):
+        raise ValueError(&quot;zip2_by needs a rank-2 mode at each guide terminal&quot;)
+    return t
+# ---------------------------------------------------------------- end shared core---------------
+
+def logical_divide(layout: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;logical_divide(A, B) -&gt; ((tile), (rest)) per the rules in the module docstring.&quot;&quot;&quot;
+    if isinstance(tiler, Layout):
+        # complement(B, |A|) 列出 B 没碰到的那些位置的“步长结构”：先在 tile 内走（B），走完一个 tile
+        # 再按 complement 跳到下一个 tile。make_layout(B, B*) 是一个覆盖 [0, |A|) 的双射，
+        # 再用 A 复合，就把“逻辑上第 i 个元素”映射回 A 的物理位置。
+        # cotarget 用 shape(coalesce(A))，不是 size(A)：两者乘积相同，但 tuple 版本的 ceil_div
+        # 在不整除时会逐模式取整（见 core 的 ceil_div），和真实 CuTe 一致。
+        cotarget = coalesce(layout).shape
+        return composition(layout, make_layout(tiler, complement(tiler, cotarget)))
+    if is_tuple(tiler):
+        # 按模式切：transform_layout 会把 A 多出来的模式原样追加（composition 的 by-mode版本会丢掉它们）。
+        return transform_layout(layout, tiler, lambda l, t: logical_divide(l, t))
+    if is_underscore(tiler):
+        return layout
+    return logical_divide(layout, Layout(tiler, 1))
+
+
+def _tile_unzip(layout: Layout, tiler) -&gt; Layout:
+    # zip2_by 只在 tiler 是 tuple 时重排；tiler 是单个 Layout/int 时 logical_divide 已经是 (tile, rest)。
+    guide = _guide(tiler)
+    return Layout(zip2_by(layout.shape, guide), zip2_by(layout.stride, guide))
+
+
+def _guide(tiler):
+    if is_tuple(tiler):
+        if any(is_underscore(t) for t in _flatten_tiler(tiler)):
+            raise ValueError(&quot;zipped_divide: tiler contains _, no (tile, rest) pair to zip&quot;)
+        return tuple(_guide(t) for t in tiler)
+    if is_underscore(tiler):
+        raise ValueError(&quot;zipped_divide: tiler contains _, no (tile, rest) pair tozip&quot;)
+    return 0
+
+
+def _flatten_tiler(tiler):
+    &quot;&quot;&quot;Leaves of a tiler tuple (Layouts, ints and _ are leaves).&quot;&quot;&quot;
+    if is_tuple(tiler):
+        out = []
+        for t in tiler:
+            out += _flatten_tiler(t)
+        return out
+    return [tiler]
+
+
+def zipped_divide(layout: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;((tile_0, tile_1, ...), (rest_0, rest_1, ..., extra modes)).&quot;&quot;&quot;
+    return _tile_unzip(logical_divide(layout, tiler), tiler)
+
+
+
+def logical_product(block: Layout, tiler) -&gt; Layout:
+    &quot;&quot;&quot;(block, complement(block) o tiler); by-mode for tuple tilers.&quot;&quot;&quot;
+    if isinstance(tiler, Layout):
+        # complement(block) 描述“block 之外”的位置：先填 block 的空洞，再越过 block 往后走。
+        # 用 tiler 去复合它，就得到“第 k 份 block 的起点”。拼起来：(block 内, 第几份)。
+        return make_layout(block, composition(complement(block), tiler))
+    if is_tuple(tiler):
+        return transform_layout(block, tiler, lambda l, t: logical_product(l, t))
+    if is_underscore(tiler):
+        return block
+    return logical_product(block, Layout(tiler, 1))
+
+
+
+def append_rank(layout: Layout, R: int) -&gt; Layout:
+    &quot;&quot;&quot;append&lt;R&gt;(layout): pad with 1:0 modes up to rank R.&quot;&quot;&quot;
+    r = layout.rank()
+    if r &gt;= R:
+        return layout
+    s = layout.shape if is_tuple(layout.shape) else (layout.shape,)
+    d = layout.stride if is_tuple(layout.stride) else (layout.stride,)
+    return Layout(s + (1,) * (R - r), d + (0,) * (R - r))
+
+
+def _rank_matched_product(block: Layout, tiler: Layout) -&gt; Layout:
+    R = max(block.rank(), tiler.rank())
+    # 整体 product（tiler 是一个 Layout，不是 tuple），再按维度配对。补的 1:0 模式让 rank 不同的
+    # block 和 tiler 也能逐维配对（见 golden 里 blocked_4_2x3 的 (_1,_3):(_0,_8)）。
+    return logical_product(append_rank(block, R), append_rank(tiler, R))
+
+
+def blocked_product(block: Layout, tiler: Layout) -&gt; Layout:
+    &quot;&quot;&quot;zip(block, tiles): each dimension becomes (block_i, tile_i) — whole blocks side by side.&quot;&quot;&quot;
+    p = _rank_matched_product(block, tiler)
+    b, t = p.mode(0), p.mode(1)
+    return Layout(zip_tuples(b.shape, t.shape), zip_tuples(b.stride, t.stride))
+
+
+def raked_product(block: Layout, tiler: Layout) -&gt; Layout:
+    &quot;&quot;&quot;zip(tiles, block): each dimension becomes (tile_i, block_i) — blocks interleaved.&quot;&quot;&quot;
+    p = _rank_matched_product(block, tiler)
+    b, t = p.mode(0), p.mode(1)
+    return Layout(zip_tuples(t.shape, b.shape), zip_tuples(t.stride, b.stride))
+
+
+
+def right_inverse(layout: Layout) -&gt; Layout:
+    &quot;&quot;&quot;CuTe right_inverse: R with layout(R(i)) == i for every i &lt; size(R).&quot;&quot;&quot;
+    c = coalesce(layout)
+    lst = list(c.stride) if is_tuple(c.stride) else [c.stride]
+    lsh = list(c.shape) if is_tuple(c.shape) else [c.shape]
+    pre = [1]
+    for s in lsh:
+        pre.append(pre[-1] * s)
+    order = sorted(range(len(lst)), key=lambda i: lst[i])
+    rs, rd, curr = [1], [0], 1
+    for i in order:
+        if lst[i] == curr:
+            rs.append(lsh[i])
+            rd.append(pre[i])
+            curr = lsh[i] * lst[i]
+    return coalesce(Layout(tuple(rs), tuple(rd)))
+
+
+def with_shape(layout: Layout, shape) -&gt; Layout:
+    &quot;&quot;&quot;Layout::with_shape(shape) == composition(layout, make_layout(shape)).&quot;&quot;&quot;
+    return composition(layout, Layout(shape))
+
+
+def swizzle(B: int, M: int, S: int, x: int) -&gt; int:
+    &quot;&quot;&quot;CuTe Swizzle&lt;B,M,S&gt; (S &gt;= 0 here): XOR bits [M+S, M+S+B) down onto bits [M,M+B).&quot;&quot;&quot;
+    mask = ((1 &lt;&lt; B) - 1) &lt;&lt; (M + S)
+    return x ^ ((x &amp; mask) &gt;&gt; S)
+
+
+# ---------------------------------------------------------------- B1: your code ----------------
+
+def local_tile_view(gA: Layout, tiler, coord):
+    &quot;&quot;&quot;local_tile = zipped_divide, then slice (_, coord): (tile layout, offset of tile `coord`).&quot;&quot;&quot;
+    z = zipped_divide(gA, tiler)
+    tile, rest = z.mode(0), z.mode(1)
+    # 切片 (_, coord)：保留 tile 模式不动，rest 模式取定坐标 → 只剩一个常数偏移。
+    return tile, rest(coord)
+
+
+def tile_map(layout: Layout, offset: int):
+    &quot;&quot;&quot;Global offsets of every element of a sliced view: offset + layout(i).&quot;&quot;&quot;
+    return [offset + layout(i) for i in range(layout.size())]
+
+
+def hand_local_tile(bm: int, k: int):
+    &quot;&quot;&quot;Hand formula from Track A: (32 bm + r) * 64 + 16 k + c, column-major over the (32,16) tile.&quot;&quot;&quot;
+    return [(32 * bm + r) * 64 + 16 * k + c for c in range(16) for r in range(32)]
+
+
+def make_layout_tv(thr: Layout, val: Layout):
+    &quot;&quot;&quot;CuTe make_tiled_copy&#x27;s construction: (layout_mn, layout_tv, tiler).&quot;&quot;&quot;
+    # raked_product 把 val 的每一维“插到”thr 对应维的内侧：每个线程的 4 个值在 K 上相邻，线程在外面排开。
+    # 它的定义域是 tile 坐标 (m, k)，值是 t + |thr|·v；right_inverse 把它倒过来，得到 (t,v) → tile 坐标。
+    layout_mn = raked_product(thr, val)
+    layout_tv = with_shape(right_inverse(layout_mn), (thr.size(), val.size()))
+    tiler = tuple(product(s) for s in layout_mn.shape)
+    return layout_mn, layout_tv, tiler
+
+
+def tv_coord(layout_tv: Layout, tiler, t: int, v: int):
+    &quot;&quot;&quot;(t, v) -&gt; (m, k) in the tile, decoding the column-major offset.&quot;&quot;&quot;
+    off = layout_tv((t, v))
+    return off % tiler[0], off // tiler[0]
+
+
+def owner(layout_mn: Layout, m: int, k: int):
+    &quot;&quot;&quot;Who copies tile element (m, k): layout_mn((m, k)) = t + T v.&quot;&quot;&quot;
+    i = layout_mn((m, k))
+    T = product(layout_mn.shape[0][1]) * product(layout_mn.shape[1][1])   # |thr| =32 * 4 = 128
+    return i % T, i // T
+
+
+def hand_copy_coord(t: int, v: int):
+    &quot;&quot;&quot;Hand-derived copy TV of ThrLayout (32,4):(4,1), ValLayout (1,4).&quot;&quot;&quot;
+    return t // 4, 4 * (t % 4) + v
+
+
+def smem_layout_map(swz, base: Layout):
+    &quot;&quot;&quot;composition(Swizzle&lt;B,M,S&gt;, base): offsets swizzle(base(i)) for i in [0, size).&quot;&quot;&quot;
+    B, M, S = swz
+    return [swizzle(B, M, S, base(i)) for i in range(base.size())]
+
+
+def hand_smem_offset(r: int, c: int) -&gt; int:
+    &quot;&quot;&quot;16 r + c, then XOR bits [4,6) down onto bits [2,4).&quot;&quot;&quot;
+    x = 16 * r + c
+    return x ^ ((x &gt;&gt; 2) &amp; 0b1100)
+
+
+def same_function(f, g, domain) -&gt; bool:
+    return all(f(x) == g(x) for x in domain)</code></pre></div></div></details>
+<h2 id="b1-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li><code>partition_S</code> 内部用 <code>tile2thrfrg(zipped_divide(stensor, Tiler_MN{}), ...)</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L226">copy_atom.hpp</a>）：它是怎样把本题的 <code>layout_tv</code> 作用到一个具体 tensor 上的？</li>
+<li>如果 thr 改成 <code>(32,4):(1,32)</code>（线程沿 M 排），<code>layout_tv</code> 会变成什么？每线程的 4 个值还连续吗？<code>test_make_layout_tv_matches_cute[colthr]</code> 里有答案。</li>
+<li><code>right_inverse</code> 遇到非单射的 layout（例如 stride 0 的广播）会怎样？为什么 MMA 的 A fragment 不能用它求唯一的持有者？</li>
+<li><code>local_tile</code> 的 <code>Step&lt;_1, X, _1&gt;</code> 投影在代数里对应什么操作？对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1050-L1068">带投影的 local_tile</a>。</li>
+</ul>
+
+<nav class="pager"><a href="a5_assemble_gemm.html">← 上一题 A5</a><a href="b2_vector_width.html">B2 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#b1-1">题面速览</a>
+<a class="o2" href="#b1-2">直觉与类比</a>
+<a class="o2" href="#b1-3">图解：三个构造</a>
+<a class="o2" href="#b1-4">逐步演示</a>
+<a class="o2" href="#b1-5">易错点</a>
+<a class="o2" href="#b1-6">对照文档</a>
+<a class="o2" href="#b1-7">上机验证</a>
+<a class="o2" href="#b1-8">三级提示</a>
+<a class="o2" href="#b1-9">参考解</a>
+<a class="o2" href="#b1-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

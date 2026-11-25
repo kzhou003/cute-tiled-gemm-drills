@@ -1,0 +1,382 @@
+{
+  "title": "从零设计 Tiled GEMM：Layout、Layout Algebra、CuTe 编译、TMA / Pipeline / Warp Specialization / PDL 练习",
+  "brand": "Tiled GEMM 练习",
+  "kicker": "CuTe · Tiled GEMM · 编译与异步执行",
+  "lede": "15 道一小时左右的练习，沿着一条主线走完：先只从硬件需求出发，亲手推导一个 64×64 Tiled GEMM 需要的五种映射（CTA tile、Copy TV、SMEM swizzle、MMA fragment、accumulator），再把它们拼成一个完整可验证的 GEMM；然后用 Layout Algebra 重新表达这些映射、看 CuTe 在编译期怎样化简和检查它们；最后把 TMA、mbarrier pipeline、warp specialization 和 PDL 加进来，得到一个结构完整的现代 GEMM，并用代价模型选配置。期望答案来自本机编译运行的真实 CuTe，也给出真实的 CUTLASS 源码对照。",
+  "lang": "zh",
+  "slug": "cute-tiled-gemm-drills",
+  "repo_url": "https://github.com/kzhou003/cute-tiled-gemm-drills",
+  "pins": {
+    "cutlass": {
+      "repo": "NVIDIA/cutlass",
+      "sha": "af951046cd9cac9301d8e3e90863fd8d7edc9fa9",
+      "local": "third_party/cutlass"
+    }
+  },
+  "tracks": [
+    {
+      "id": "A",
+      "title": "Track A · 从零设计：五个空间映射问题",
+      "desc": "只从硬件需求出发：CTA 拿哪块、线程怎么搬、SMEM 怎么摆、MMA 要什么 fragment、结果放哪；最后拼成一个完整可验证的 GEMM。"
+    },
+    {
+      "id": "B",
+      "title": "Track B · 用 Layout Algebra 重新表达",
+      "desc": "把 Track A 手写的映射改写成 composition、divide、product、inverse，并推导向量宽度。"
+    },
+    {
+      "id": "C",
+      "title": "Track C · CuTe 编译期在做什么",
+      "desc": "静态化简、常量折叠与强度削减，以及编译期合法性检查；上机看真实编译器的输出。"
+    },
+    {
+      "id": "D",
+      "title": "Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL",
+      "desc": "TMA 描述符与 box、mbarrier 多级流水线、producer / consumer warp 分工、跨 kernel 的 PDL。"
+    },
+    {
+      "id": "E",
+      "title": "Track E · 完整成熟的 Tiled GEMM",
+      "desc": "把所有部件拼成一个带 TMA、流水线、warp specialization 和 PDL 的 GEMM 模拟，并在约束下选配置。"
+    }
+  ],
+  "drills": [
+    {
+      "id": "A1",
+      "stem": "a1_cta_tiling",
+      "title": "CTA 切分：C tile、K 循环、local_tile 视图与边界谓词",
+      "minutes": 45,
+      "difficulty": "易",
+      "track": "A",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon"
+      ]
+    },
+    {
+      "id": "A2",
+      "stem": "a2_copy_tv",
+      "title": "线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "A",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon"
+      ]
+    },
+    {
+      "id": "A3",
+      "stem": "a3_smem_swizzle",
+      "title": "Shared memory 怎样摆：行主序、Swizzle<2,2,2> 与 bank conflict 的实测",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "A",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon"
+      ]
+    },
+    {
+      "id": "A4",
+      "stem": "a4_mma_fragments",
+      "title": "MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加",
+      "minutes": 55,
+      "difficulty": "难",
+      "track": "A",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon"
+      ]
+    },
+    {
+      "id": "A5",
+      "stem": "a5_assemble_gemm",
+      "title": "把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]",
+      "minutes": 65,
+      "difficulty": "难",
+      "track": "A",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon",
+        "local_tile_coords",
+        "copy_coords",
+        "smem_offset",
+        "ptx_a",
+        "ptx_b",
+        "ptx_c",
+        "tiled_tv"
+      ]
+    },
+    {
+      "id": "B1",
+      "stem": "b1_algebra_rewrite",
+      "title": "用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout",
+      "minutes": 60,
+      "difficulty": "难",
+      "track": "B",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon",
+        "Underscore",
+        "is_underscore",
+        "product",
+        "rank",
+        "get",
+        "unwrap",
+        "ceil_div",
+        "crd2idx",
+        "idx2crd",
+        "crd2crd_1d",
+        "Layout",
+        "_compact_left",
+        "_has_underscore",
+        "make_layout",
+        "_as_layout",
+        "_append_mode",
+        "_bw_coalesce",
+        "coalesce",
+        "coalesce_x",
+        "filter_layout",
+        "transform_layout",
+        "_composition_impl",
+        "composition",
+        "_complement_prefix",
+        "complement",
+        "slice_tuple",
+        "_lift_slice",
+        "slice_layout",
+        "zip_tuples",
+        "zip2_by",
+        "logical_divide",
+        "_tile_unzip",
+        "_guide",
+        "_flatten_tiler",
+        "zipped_divide",
+        "logical_product",
+        "append_rank",
+        "_rank_matched_product",
+        "blocked_product",
+        "raked_product",
+        "right_inverse",
+        "with_shape",
+        "swizzle"
+      ]
+    },
+    {
+      "id": "B2",
+      "stem": "b2_vector_width",
+      "title": "一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom",
+      "minutes": 50,
+      "difficulty": "中",
+      "track": "B",
+      "given": [
+        "is_tuple",
+        "flatten",
+        "fmt_tuple",
+        "fmt_layout",
+        "parse_tuple",
+        "parse_layout",
+        "_split_top_colon",
+        "Underscore",
+        "is_underscore",
+        "product",
+        "rank",
+        "get",
+        "unwrap",
+        "ceil_div",
+        "crd2idx",
+        "idx2crd",
+        "crd2crd_1d",
+        "Layout",
+        "_compact_left",
+        "_has_underscore",
+        "make_layout",
+        "_as_layout",
+        "_append_mode",
+        "_bw_coalesce",
+        "coalesce",
+        "coalesce_x",
+        "filter_layout",
+        "transform_layout",
+        "_composition_impl",
+        "composition",
+        "_complement_prefix",
+        "complement",
+        "slice_tuple",
+        "_lift_slice",
+        "slice_layout",
+        "zip_tuples",
+        "zip2_by",
+        "logical_divide",
+        "_tile_unzip",
+        "_guide",
+        "_flatten_tiler",
+        "zipped_divide",
+        "logical_product",
+        "append_rank",
+        "_rank_matched_product",
+        "blocked_product",
+        "raked_product",
+        "right_inverse",
+        "with_shape",
+        "swizzle",
+        "Swizzled"
+      ]
+    },
+    {
+      "id": "C1",
+      "stem": "c1_static_folding",
+      "title": "编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照",
+      "minutes": 60,
+      "difficulty": "难",
+      "track": "C",
+      "given": [
+        "C",
+        "V",
+        "evaluate",
+        "pretty"
+      ]
+    },
+    {
+      "id": "C2",
+      "stem": "c2_compile_checks",
+      "title": "编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "C",
+      "given": [
+        "coalesce_flat",
+        "Violation",
+        "GemmConfig"
+      ]
+    },
+    {
+      "id": "D1",
+      "stem": "d1_tma_box",
+      "title": "TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "D",
+      "given": [
+        "TmaDesc"
+      ]
+    },
+    {
+      "id": "D2",
+      "stem": "d2_mbarrier_pipeline",
+      "title": "mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug",
+      "minutes": 60,
+      "difficulty": "难",
+      "track": "D",
+      "given": [
+        "ProtocolError",
+        "DeadlockError",
+        "RaceError",
+        "SimResult"
+      ]
+    },
+    {
+      "id": "D3",
+      "stem": "d3_warp_specialization",
+      "title": "Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "D",
+      "given": [
+        "Segment",
+        "Schedule"
+      ]
+    },
+    {
+      "id": "D4",
+      "stem": "d4_pdl_chain",
+      "title": "PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "D",
+      "given": [
+        "Phase",
+        "Kernel",
+        "two_gemm_chain"
+      ]
+    },
+    {
+      "id": "E1",
+      "stem": "e1_full_gemm",
+      "title": "完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL",
+      "minutes": 75,
+      "difficulty": "难",
+      "track": "E",
+      "given": [
+        "Cfg",
+        "sw128",
+        "smem_read",
+        "RaceError",
+        "Deadlock",
+        "Barrier",
+        "Sim",
+        "union_length",
+        "intersect_length",
+        "Ctx"
+      ]
+    },
+    {
+      "id": "E2",
+      "stem": "e2_config_search",
+      "title": "选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序",
+      "minutes": 55,
+      "difficulty": "中",
+      "track": "E",
+      "given": [
+        "GPU",
+        "Config"
+      ]
+    }
+  ],
+  "knowledge": [
+    "overview",
+    "from_scratch",
+    "algebra_compile",
+    "time_dimension",
+    "real_code",
+    "references"
+  ],
+  "pdf": "cute-tiled-gemm-drills.pdf",
+  "quality": {
+    "flows": 1,
+    "steps": 1,
+    "analogies": 1,
+    "hints": 3
+  }
+}

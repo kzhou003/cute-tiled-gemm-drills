@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>C2 · 编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3 cur" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">C2 · Track C · CuTe 编译期在做什么 · 55 分钟 · 中</div><h1>C2 · 编译期合法性检查：复刻 CuTe 的 static_assert，再给 GEMM 配置做体检</h1><p class="lede">静态 shape 和 stride 的第二个好处是：很多配置错误在编译期就被 static_assert 拦下来，而不是在 GPU 上悄悄算出错误结果。这道题先复刻几条真实的 CuTe static_assert（composition 的两条整除条件、Swizzle 参数、TiledCopy 线程/值数、tile_to_shape），和真实编译器对拍 63 个程序；再给运行例子的整套 GEMM 配置做一次体检，分清哪些错误 CuTe 会拦、哪些要靠 CUTLASS 层面的约束、哪些能编译但需要运行时谓词。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/c2_compile_checks.py"><code>mine/c2_compile_checks.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_c2_compile_checks.py"><code>tests/test_c2_compile_checks.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/c2_compile_checks.py"><code>solutions/c2_compile_checks.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="C2"> 我已完成这道题</label></header>
+<h2 id="c2-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/algebra_compile.html">Layout Algebra 与编译</a> 的“编译期合法性检查”。</li>
+<li><strong>在体系里的位置</strong>：composition 的两条整除条件在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1033">composition_impl</a>；Swizzle 的三条参数检查在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">swizzle.hpp</a>；“too few thrs / vals” 在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp">copy_atom.hpp</a>；<code>tile_to_shape</code> 的两条在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1818">layout.hpp</a>。</li>
+<li><strong>你要实现</strong>：<code>composition_check</code>、<code>swizzle_check</code>、<code>tiled_copy_check</code>、<code>tile_to_shape_check</code>、<code>predict_compiles</code>、<code>check_config</code>。<code>coalesce_flat</code>、<code>Violation</code>、<code>GemmConfig</code>、<code>SNIPPETS</code>、<code>RUNNING_EXAMPLE</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>动态值用 <code>None</code> 表示，涉及它的检查一律跳过（CuTe 叫 weak divisibility condition：只在能静态验证时验证）。</li>
+<li>composition 先把 lhs <code>coalesce_flat</code>；rhs 是 tuple 时每个模式单独检查（右分配律），消息去重。</li>
+<li>每个 rhs 模式：<code>rest_stride % curr_shape == 0 or rest_stride &lt; curr_shape</code>，否则 Stride 条件失败；<code>new_shape = min(ceil(curr_shape/rest_stride), rest_shape)</code> 必须整除 <code>rest_shape</code>，否则 Shape 条件失败。</li>
+<li><code>check_config</code> 按题面表格顺序报告 13 种 code，layer 是 <code>cute</code> / <code>cutlass</code> / <code>runtime</code> 之一。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：15 个手写 CuTe 程序和 48 个随机 composition 程序，能否编译、第一条 <code>static_assert</code> 消息都和真实 clang + CuTe 头文件一致 · 两条整除条件、coalesce 先行、动态跳过、stride 0 · rhs 分配与去重 · Swizzle、TiledCopy、tile_to_shape 的消息 · 运行例子体检为空 · ldmatrix、线程数、tile 整除、向量宽度、对齐、swizzle 跨度、smem 容量（24 级刚好放下，25 级超）、非整除问题尺寸各自报出正确的 code 和 layer。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>static_assert</strong>：C++ 的编译期断言，条件为假时编译失败并打印消息。</li>
+<li><strong>weak divisibility condition</strong>（弱整除条件）：CuTe 的说法：两边都是静态整数时才检查，有一边是运行时值就放行。</li>
+<li><strong>谓词</strong>（predication）：给每次访存加一个“是否越界”的条件，处理问题尺寸不是 tile 整数倍的最后一块。</li>
+<li><strong>ldmatrix</strong>：SM75+ 的 warp 级指令，一次从 shared memory 读若干个 8×8 的 16-bit 矩阵到寄存器，每行要求 16 字节连续。</li>
+</ul>
+</div>
+<h2 id="c2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 建筑图纸审查</div><p>盖楼之前图纸要过审：结构规范（CuTe 的 <code>static_assert</code>）是硬性规定，梁的跨度不能被柱距整除，图纸直接打回；设计院的内部规范（CUTLASS collective 的约束，如“copy 的向量宽度必须正好是一个 atom”“ldmatrix 需要 16 字节一行”）不是物理定律，但违反了要么造不出来、要么很难用；现场情况（运行时）比如地块不是整数个开间，图纸能过审，但施工时要在最后一跨特殊处理（谓词）。好的审查要把三类问题分开说清楚，而不是只说“不行”。</p>
+</div>
+
+<div class="callout key"><div class="callout-title">要点 · 能静态知道的，就静态拦下</div><p>CuTe 的检查都写成 <code>static_assert</code>，条件里只用 <code>Int&lt;N&gt;</code> 这样的编译期常量；一旦某个 shape 或 stride 是运行时 <code>int</code>，检查就退化为“放行”（<code>composition_impl</code> 里的 <code>if constexpr (is_static&lt;...&gt;::value)</code>）。所以同一个 composition，静态时会被拒绝，动态时能编译、运行时给出没有意义的结果：<code>comp_dynamic_ok</code> 就是这样。这也是 CUTLASS 把 tile 形状做成模板参数的另一个理由。</p>
+</div>
+<h2 id="c2-3">图解：一个配置要过的三道关</h2>
+
+<figure class="flow"><div class="flow-head">检查的三层<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;检查的三层&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;cfg&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;GemmConfig&quot;, &quot;s&quot;: &quot;tile、copy、mma、swizzle&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cute&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;CuTe static_assert&quot;, &quot;s&quot;: &quot;swizzle · copy_vals&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cl&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;CUTLASS 约束&quot;, &quot;s&quot;: &quot;线程·tile·向量·smem&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rt&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;运行时&quot;, &quot;s&quot;: &quot;ragged_tile → 谓词&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ok&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;可以生成 kernel&quot;, &quot;s&quot;: &quot;check_config == []&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;cfg&quot;, &quot;b&quot;: &quot;cute&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cute&quot;, &quot;b&quot;: &quot;cl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cl&quot;, &quot;b&quot;: &quot;rt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cl&quot;, &quot;b&quot;: &quot;ok&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 220.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>只有第一层是“编译器会拦”的真实 <code>static_assert</code>（本题和真实 CuTe 对拍）；第二层是 CUTLASS 的 collective / 硬件指令的要求，本题按 CUTLASS 的写法建模，不是对拍出来的；第三层能编译，但最后一块 tile 要加谓词。</figcaption></figure>
+<h2 id="c2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ composition 的 Stride 与 Shape 条件：lhs = (4,6):(1,5)，它不能 coalesce</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;l&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;lhs (4,6):(1,5)&quot;, &quot;s&quot;: &quot;coalesce 后不变&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;r8&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;rhs 3:8&quot;, &quot;s&quot;: &quot;8 % 4 == 0 → 通过&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;r6&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;rhs 3:6&quot;, &quot;s&quot;: &quot;6 % 4 ≠ 0 且 6 ≥ 4&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;r2&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;rhs 3:2&quot;, &quot;s&quot;: &quot;2 不整除 3&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;lc&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;lhs (4,6):(1,4)&quot;, &quot;s&quot;: &quot;= 24:1，3:6 通过&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="l"><div class="step-title">1. 为什么要检查</div><p><code>composition(A, B)(i) = A(B(i))</code>。B 的 stride 告诉你“在 A 的一维索引空间里每次跨多远”。A 是 <code>(4,6):(1,5)</code>：一维索引 0..3 走第一个模式，4..23 每 4 个进一行。只有当 B 的步长“和 A 的模式边界对齐”时，结果才是一个合法的 layout（每个模式还是 shape:stride 的等差形式）。</p>
+</div><div class="step" data-hl="l,r8"><div class="step-title">2. 3:8 通过</div><p><code>rest_stride = 8</code>，<code>curr_shape = 4</code>：<code>8 % 4 == 0</code>，正好跨两行。<code>next_shape = ceil(4/8) = 1</code>，只更新 <code>rest_stride = 2</code>。结果 <code>_3:_10</code>（每步跨 A 的两行，即 2·5 = 10）。</p>
+</div><div class="step" data-hl="l,r6"><div class="step-title">3. 3:6 失败：Stride Divisibility</div><p><code>6 % 4 = 2</code> 且 <code>6 ≥ 4</code>：每一步落在“一行半”的位置，第 0、1、2 个元素在 A 里分别是 0、(2,1)→7、(0,3)→15，不是等差数列，没法写成一个 shape:stride。真实 CuTe：<code>Stride Divisibility Condition</code>。</p>
+</div><div class="step" data-hl="l,r2"><div class="step-title">4. 3:2 失败：Shape Divisibility</div><p><code>2 &lt; 4</code> 通过 stride 条件；<code>next_shape = ceil(4/2) = 2</code>，<code>new_shape = min(2, 3) = 2</code>，但 <code>3 % 2 ≠ 0</code>：3 个元素里前 2 个在 A 的第一个模式里，第 3 个要跨到下一行，不能整齐地切开。真实 CuTe：<code>Shape Divisibility Condition</code>。</p>
+</div><div class="step" data-hl="lc"><div class="step-title">5. 先 coalesce</div><p><code>(4,6):(1,4)</code> 里 <code>4·1 == 4</code>，coalesce 成 <code>24:1</code>，只剩一个模式，任何 rhs 都合法：<code>3:6</code> 得到 <code>_3:_6</code>。同一个 rhs，lhs 换一个“等价但形状不同”的写法，结果就不一样：检查是在规范化之后做的。</p>
+</div></div></div>
+<h2 id="c2-5">易错点</h2>
+<ul>
+<li><strong>忘了先 coalesce lhs。</strong> <code>(4,6):(1,4)</code> 和 <code>(4,6):(1,5)</code> 对 <code>3:6</code> 的结论相反；测试 <code>test_composition_rules</code> 和 <code>comp_coalesced_ok</code>。</li>
+<li><strong>动态值也去检查。</strong> <code>None</code> 参与的任何判断都要跳过，算术结果也变成 <code>None</code>；<code>comp_dynamic_ok</code> 在真实 CuTe 里能编译。</li>
+<li><strong>stride 0 也检查。</strong> <code>rd == 0</code> 是广播，永远合法。</li>
+<li><strong>rhs 是 tuple 时只查第一个模式，或者不去重。</strong> 测试 <code>test_composition_messages_are_deduplicated</code>。</li>
+<li><strong>Swizzle 的消息顺序。</strong> 先 MBase，再 BBits，最后 SShift；<code>swizzle_check(-1, -1, 0)</code> 有两条。</li>
+<li><strong>以为 TiledMMA 遇到不整除的 tile 会编译失败。</strong> 真实 CuTe 里 <code>tiled_mma_bad_tile</code> 能编译（partition 允许不整除，最后一块要靠谓词）；所以 <code>mma_tile</code> 是 CUTLASS 层面的约束，不是 CuTe 的 <code>static_assert</code>。</li>
+<li><strong>smem 只算一个操作数。</strong> 每级要放 A 和 B 两个 tile：<code>stages·(BM+BN)·BK·2 B</code>，运行例子每级 2048 B，24 级 = 49152 B 刚好等于 48 KB。测试 <code>test_smem_capacity_boundary</code>。</li>
+</ul>
+<h2 id="c2-6">上机验证</h2>
+<p><code>oracle/c2_snippets/</code> 里有 15 个手写程序，<code>python3 oracle/c2_sweep.py</code> 再生成 48 个随机 composition（lhs 5 种 × rhs 随机抽样，<code>random.Random(7)</code>）。<code>oracle/c2_try_compile.sh</code> 用真实 CuTe 头文件对每个程序跑 <code>clang++ -std=c++17 -fsyntax-only</code>，记录能否编译和第一条 <code>static_assert</code> 消息，写进 <code>tests/golden/c2_compile_checks.json</code>（63 个程序，本机约两分半钟；48 个随机程序里 9 个编译失败：5 个 Stride、4 个 Shape 条件）。</p>
+<pre><code class="language-text">$ oracle/c2_try_compile.sh
+comp_coalesced_ok      ok
+comp_dynamic_ok        ok
+comp_ok                ok
+comp_shape_fail        FAIL Shape Divisibility Condition
+comp_stride_fail       FAIL Stride Divisibility Condition
+local_tile_ok          ok
+local_tile_ragged      ok
+swizzle_ok             ok
+swizzle_shift_fail     FAIL abs(SShift) must be more than BBits.
+tile_to_shape_fail     FAIL tile_to_shape: block shape does not divide the target shape.
+tile_to_shape_ok       ok
+tiled_copy_ok          ok
+tiled_copy_vec_fail    FAIL TiledCopy uses too few vals for selected CopyAtom
+tiled_mma_bad_tile     ok
+tiled_mma_ok           ok
+sweep_00 ...
+</code></pre>
+<p><code>playground/c2_compile_checks.cpp</code> 里有几行注释掉的非法写法，取消注释再运行就能看到对应的 <code>static_assert</code>。</p>
+<h2 id="c2-7">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">composition_check(((4, 6), (1, 5)), (3, 8))        # []
+composition_check(((4, 6), (1, 5)), (3, 6))        # ['Stride Divisibility Condition']
+composition_check(((4, 6), (1, 5)), (3, None))     # []   动态 stride：跳过
+predict_compiles(SNIPPETS[&quot;swizzle_shift_fail&quot;])   # (False, 'abs(SShift) must be more than BBits.')
+[v.code for v in check_config(dataclasses.replace(RUNNING_EXAMPLE, threads=256))]
+                                                   # ['copy_threads', 'mma_threads']
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>运行例子的 copy atom 是 64 bit、元素 16 bit，每线程 4 个值。如果换成 128 bit 的 atom，哪条 CuTe 断言会失败？要让它通过，<code>copy_val</code> 应该改成什么，<code>copy_thr</code> 又要跟着怎么改？</li>
+<li><code>Swizzle&lt;2,2,2&gt;</code> 的 M=2 表示“4 个元素一组不被打乱”。为什么它必须 ≥ 每线程连续的 K 元素数？</li>
+<li>为什么开启 ldmatrix 时 <code>Swizzle&lt;2,2,2&gt;</code> 不再合格，换成 <code>Swizzle&lt;1,3,3&gt;</code> 就可以？</li>
+<li>问题尺寸 M=100 时，CuTe 能编译，但为什么体检要报 <code>ragged_tile</code>？它属于哪一层？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>_composition_mode(lhs, rs, rd)</code>：完全照着题面的伪代码写；每个比较前判断是否都已知，算术遇到 <code>None</code> 结果就是 <code>None</code>。</li>
+<li><code>composition_check</code>：rhs shape 是 tuple 就 <code>zip(rs, rd)</code>，否则当成一个模式；对每个模式的结果按顺序追加、跳过已有的。</li>
+<li>三个小检查各自返回一个消息列表，顺序和题面一致。</li>
+<li><code>predict_compiles</code>：按 <code>desc[0]</code> 分派，返回 <code>(not msgs, msgs[0] if msgs else &quot;&quot;)</code>。</li>
+<li><code>check_config</code>：严格按表格顺序一条条写 <code>if</code>，每条最多 append 一次；<code>copy_vals</code> 调 <code>tiled_copy_check(copy_atom_bits, 8*elem_bytes, 1, prod(copy_thr), prod(copy_val))</code>。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>128 bit / 16 bit = 8 个值，每线程 4 个值不是 8 的倍数：<code>TiledCopy uses too few vals for selected CopyAtom</code>。<code>copy_val</code> 改成 (1,8)，BK=16 时 K 方向只需要 2 个线程，<code>copy_thr</code> 改成 (64,2)（仍是 128 线程，且要求 BM ≥ 64）或保持 (32,4) 但把 BK 改成 32。这就是 B2（向量宽度）讨论的取舍。</li>
+<li>Swizzle 只对“块号”做异或，块内低 M 位保持不变。一个线程一次向量写入的 4 个元素必须落在同一个不被打乱的块里，否则 4 个元素在 smem 里不再连续，向量指令就不成立。</li>
+<li>ldmatrix 每行读 16 字节 = 8 个 half，要求这 8 个元素在 smem 里连续：<code>2^M · 2 B ≥ 16 B</code>，即 M ≥ 3。<code>Swizzle&lt;1,3,3&gt;</code> 的块是 8 个元素；<code>Swizzle&lt;2,2,2&gt;</code> 的块只有 4 个，会被拆开。</li>
+<li><code>local_tile</code> 和 partition 允许最后一块不完整（<code>local_tile_ragged</code> 能编译），但访存会越界，需要用 <code>make_identity_tensor</code> 加谓词，或者在 host 端 pad。它是 runtime 层：编译器帮不了你，只能靠 kernel 逻辑。</li>
+</ol>
+</div></details></div></details>
+<h2 id="c2-8">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/c2_compile_checks.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/c2_compile_checks.py</span><span class="muted small">284 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;C2 · 编译期合法性检查：CuTe 的 static_assert 与一个 GEMM 配置的完整体检 — reference solution.
+
+CuTe 的“零成本抽象”有两面：静态的 shape / stride 让编译器把索引折叠成几条指令（C1），
+也让很多错误在**编译期**就被 static_assert 拦下来，而不是在 GPU 上算出错的结果。这道题分两层：
+1. 复刻几条真实的 CuTe static_assert（结果和真实编译器对拍，tests/golden/c2_compile_checks.json
+   由 oracle/c2_try_compile.sh 用真实 CuTe 头文件编译 oracle/c2_snippets/*.cpp 得到）：
+   - composition 的 “Stride Divisibility Condition” 与 “Shape Divisibility Condition”
+     （cute/layout.hpp 的 detail::composition_impl；只在两边都是静态整数时检查，动态值跳过）；
+   - Swizzle&lt;B,M,S&gt; 的三条参数检查（cute/swizzle.hpp）；
+   - TiledCopy 的 “uses too few thrs / vals for selected CopyAtom”（cute/atom/copy_atom.hpp）；
+   - tile_to_shape 的整除检查（cute/layout.hpp）。
+2. 对一个完整 GEMM 配置做体检：把 CuTe 会拦下的、CUTLASS 的 collective 会拦下的、以及
+   “能编译但需要运行时谓词或性能会差”的问题分别列出来。
+
+约定
+- 静态整数用 int 表示；动态（运行时才知道）的值用 None 表示，涉及它的检查一律跳过（CuTe 的
+  “weak divisibility condition”：只在能静态验证时验证）。
+- 扁平 layout 用 (shape_tuple, stride_tuple) 或单个 (int, int) 表示 rank-1。
+
+API
+    coalesce_flat(shape, stride) -&gt; (shape, stride)      given：静态扁平 coalesce（去掉尺寸 1，s_i*d_i == d_{i+1} 合并）
+    Violation(code, layer, message)                       given：layer ∈ {&quot;cute&quot;, &quot;cutlass&quot;, &quot;runtime&quot;}
+    GemmConfig(...)                                       given：见下面的字段说明
+    SNIPPETS                                              given：oracle/c2_snippets里每个程序的结构化描述
+    RUNNING_EXAMPLE                                       given：仓库的运行例子配置
+
+    composition_check(lhs, rhs) -&gt; list[str]
+        lhs = (shape, stride) 扁平；rhs = (shape, stride)，shape/stride 是 int（rank1）或扁平 tuple。
+        rhs 是 tuple 时对每个模式分别检查（右分配律），消息按出现顺序合并、去重。
+        对每个 rank-1 的 rhs 模式 (rs, rd)：
+          1. lhs 先 coalesce_flat；若 rd == 0，或 coalesce 后 lhs 只有一个模式 → 合法。
+          2. rest_shape, rest_stride = rs, rd；依次处理 lhs 除最后一个之外的每个模式 curr_shape：
+             - 若 rest_stride 和 curr_shape 都已知：要求 rest_stride % curr_shape == 0 或
+               rest_stride &lt; curr_shape，否则记 &quot;Stride Divisibility Condition&quot;（并停止检查这个模式）；
+             - next_shape = ceil(curr_shape / |rest_stride|)，next_stride = ceil(|rest_stride| / curr_shape)·sign；
+             - 若 next_shape == 1 或 rest_shape == 1：只更新 rest_stride = next_stride；
+             - 否则 new_shape = min(next_shape, rest_shape)；若都已知且 rest_shape % new_shape != 0，
+               记 &quot;Shape Divisibility Condition&quot;（并停止）；rest_shape //= new_shape，rest_stride = next_stride。
+             未知值参与的算术结果也是未知（None）。
+    swizzle_check(B, M, S) -&gt; list[str]
+        M &lt; 0 → &quot;MBase must be positive.&quot;；B &lt; 0 → &quot;BBits must be positive.&quot;；
+        |S| &lt; B → &quot;abs(SShift) must be more than BBits.&quot;（按这个顺序）。
+    tiled_copy_check(atom_bits, elem_bits, atom_threads, thr_size, val_size) -&gt; list[str]
+        AtomNumVal = atom_bits // elem_bits（每个线程一次搬的元素数）；
+        thr_size % atom_threads != 0 → &quot;TiledCopy uses too few thrs for selected CopyAtom&quot;；
+        val_size % AtomNumVal != 0 → &quot;TiledCopy uses too few vals for selected CopyAtom&quot;。
+    tile_to_shape_check(block_shape, target_shape) -&gt; list[str]
+        len(block) &gt; len(target) → &quot;Rank of layout must be &lt;= rank of target shape.&quot;；
+        否则 block 末尾补 1，若 target 全部已知且某一维 target % block != 0 →
+        &quot;tile_to_shape: block shape does not divide the target shape.&quot;
+    predict_compiles(desc) -&gt; (bool, str)
+        desc 是 SNIPPETS 的一项：(&quot;composition&quot;, lhs, rhs) / (&quot;swizzle&quot;, B, M, S) /
+        (&quot;tiled_copy&quot;, atom_bits, elem_bits, atom_threads, thr_size, val_size) /
+        (&quot;tile_to_shape&quot;, block_shape, target_shape) / (&quot;always_ok&quot;, reason)。
+        返回 (是否能编译, 第一条错误消息或 &quot;&quot;)。
+    check_config(cfg) -&gt; list[Violation]
+        按下面的顺序检查，返回所有违反项（code 唯一）：
+          code              layer      条件（违反时报告）
+          swizzle_params    cute       cfg.swizzle 不为 None 且 swizzle_check 非空
+          copy_vals         cute       tiled_copy_check(copy_atom_bits, 8*elem_bytes, 1, size(copy_thr), size(copy_val)) 非空
+          copy_threads      cutlass    size(copy_thr) != threads
+          mma_threads       cutlass    32 * prod(mma_warps) != threads
+          copy_tile         cutlass    BM % (thr_m*val_m) 或 BK % (thr_k*val_k) 不为0（copy_thr/val 是 (M,K) 两维）
+          mma_tile          cutlass    BM % (atom_m*warps_m)、BN % (atom_n*warps_n)、BK % (atom_k*warps_k) 有不为 0 的
+          vector_bytes      cutlass    val_k * elem_bytes * 8 != copy_atom_bits（每线程连续 K 元素必须正好是一个 atom）
+          alignment         cutlass    K*elem_bytes 或 BK*elem_bytes 不是 copy_atom_bits//8 的倍数
+          swizzle_span      cutlass    swizzle 存在且 (BM*BK) % 2**(B+M+S) != 0
+          swizzle_vector    cutlass    swizzle 存在且 2**M &lt; val_k（swizzle 会把一个向量拆开）
+          ldmatrix          cutlass    use_ldmatrix 且（elem_bytes != 2，或 BK*elem_bytes % 16 != 0，
+                                       或 swizzle 存在且 2**M * elem_bytes &lt; 16）
+          smem_capacity     cutlass    stages * (BM + BN) * BK * elem_bytes &gt; smem_limit
+          ragged_tile       runtime    M % BM、N % BN、K % BK 有不为 0 的（能编译，但需要谓词）
+        message 是一句话的说明（内容不测试，code 与 layer 被测试）。
+&quot;&quot;&quot;
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from math import prod
+
+
+def coalesce_flat(shape, stride):
+    &quot;&quot;&quot;静态扁平 coalesce；rank-1 输入可以是 int。&quot;&quot;&quot;
+    if isinstance(shape, int):
+        shape, stride = (shape,), (stride,)
+    modes = [(s, d) for s, d in zip(shape, stride) if s != 1]
+    if not modes:
+        return (1,), (0,)
+    out = [modes[0]]
+    for s, d in modes[1:]:
+        ps, pd = out[-1]
+        if ps is not None and pd is not None and d is not None and ps * pd == d:
+            out[-1] = (ps * s if s is not None else None, pd)
+        else:
+            out.append((s, d))
+    return tuple(s for s, _ in out), tuple(d for _, d in out)
+
+
+@dataclass(frozen=True)
+class Violation:
+    code: str
+    layer: str          # &quot;cute&quot; | &quot;cutlass&quot; | &quot;runtime&quot;
+    message: str
+
+
+@dataclass(frozen=True)
+class GemmConfig:
+    &quot;&quot;&quot;一个 SM80 风格 GEMM 的静态配置。&quot;&quot;&quot;
+    M: int = 64
+    N: int = 64
+    K: int = 64
+    BM: int = 32
+    BN: int = 32
+    BK: int = 16
+    threads: int = 128
+    elem_bytes: int = 2                       # half
+    copy_atom_bits: int = 64                  # UniversalCopy&lt;uint64_t&gt;：4 个 half
+    copy_thr: tuple = (32, 4)                 # (M, K) 方向的线程数
+    copy_val: tuple = (1, 4)                  # 每线程 (M, K) 方向的值数
+    swizzle: tuple | None = (2, 2, 2)         # (B, M, S) 或 None
+    mma_atom: tuple = (16, 8, 16)             # m16n8k16
+    mma_warps: tuple = (2, 2, 1)
+    use_ldmatrix: bool = False
+    stages: int = 1
+    smem_limit: int = 48 * 1024
+
+
+RUNNING_EXAMPLE = GemmConfig()
+
+SNIPPETS = {
+    &quot;comp_ok&quot;: (&quot;composition&quot;, ((4, 8), (8, 1)), ((2, 4), (1, 2))),
+    &quot;comp_stride_fail&quot;: (&quot;composition&quot;, ((4, 6), (1, 5)), (3, 6)),
+    &quot;comp_shape_fail&quot;: (&quot;composition&quot;, ((4, 6), (1, 5)), (3, 2)),
+    &quot;comp_coalesced_ok&quot;: (&quot;composition&quot;, ((4, 6), (1, 4)), (3, 6)),
+    &quot;comp_dynamic_ok&quot;: (&quot;composition&quot;, ((4, 6), (1, 5)), (3, None)),
+    &quot;swizzle_ok&quot;: (&quot;swizzle&quot;, 2, 2, 2),
+    &quot;swizzle_shift_fail&quot;: (&quot;swizzle&quot;, 3, 3, 2),
+    &quot;tiled_copy_ok&quot;: (&quot;tiled_copy&quot;, 64, 16, 1, 128, 4),
+    &quot;tiled_copy_vec_fail&quot;: (&quot;tiled_copy&quot;, 128, 16, 1, 128, 4),
+    &quot;tile_to_shape_ok&quot;: (&quot;tile_to_shape&quot;, (8, 64), (128, 64)),
+    &quot;tile_to_shape_fail&quot;: (&quot;tile_to_shape&quot;, (8, 64), (12, 64)),
+    &quot;tiled_mma_ok&quot;: (&quot;always_ok&quot;, &quot;partition_C of a divisible 32x32 tile&quot;),
+    &quot;tiled_mma_bad_tile&quot;: (&quot;always_ok&quot;, &quot;partition of a ragged tile is a runtime concern&quot;),
+    &quot;local_tile_ok&quot;: (&quot;always_ok&quot;, &quot;local_tile of a divisible tile&quot;),
+    &quot;local_tile_ragged&quot;: (&quot;always_ok&quot;, &quot;local_tile allows a ragged last tile&quot;),
+}
+
+
+def _cdiv(a, b):
+    return -(-a // b)
+
+
+def _known(*xs):
+    return all(x is not None for x in xs)
+
+
+def _composition_mode(lhs, rs, rd):
+    ls, ld = coalesce_flat(*lhs)
+    if rd == 0 or len(ls) == 1:
+        return []
+    rest_shape, rest_stride = rs, rd
+    for curr_shape in ls[:-1]:
+        if _known(rest_stride, curr_shape):
+            if not (rest_stride % curr_shape == 0 or rest_stride &lt; curr_shape):
+                return [&quot;Stride Divisibility Condition&quot;]
+        if _known(rest_stride, curr_shape):
+            next_shape = _cdiv(curr_shape, abs(rest_stride))
+            next_stride = _cdiv(abs(rest_stride), curr_shape) * (1 if rest_stride &gt;= 0 else -1)
+        else:
+            next_shape = next_stride = None
+        if next_shape == 1 or rest_shape == 1:
+            rest_stride = next_stride
+            continue
+        new_shape = min(next_shape, rest_shape) if _known(next_shape, rest_shape) else None
+        if _known(new_shape, rest_shape) and rest_shape % new_shape != 0:
+            return [&quot;Shape Divisibility Condition&quot;]
+        rest_shape = rest_shape // new_shape if _known(new_shape, rest_shape) else None
+        rest_stride = next_stride
+    return []
+
+
+def composition_check(lhs, rhs) -&gt; list:
+    &quot;&quot;&quot;CuTe composition 的两条静态整除条件。&quot;&quot;&quot;
+    rs, rd = rhs
+    pairs = list(zip(rs, rd)) if isinstance(rs, tuple) else [(rs, rd)]
+    out = []
+    for s, d in pairs:          # 右分配律：rhs 的每个模式单独和 lhs 复合
+        for msg in _composition_mode(lhs, s, d):
+            if msg not in out:
+                out.append(msg)
+    return out
+
+
+def swizzle_check(B, M, S) -&gt; list:
+    out = []
+    if M &lt; 0:
+        out.append(&quot;MBase must be positive.&quot;)
+    if B &lt; 0:
+        out.append(&quot;BBits must be positive.&quot;)
+    if abs(S) &lt; B:
+        out.append(&quot;abs(SShift) must be more than BBits.&quot;)
+    return out
+
+
+def tiled_copy_check(atom_bits, elem_bits, atom_threads, thr_size, val_size) -&gt; list:
+    out = []
+    atom_vals = atom_bits // elem_bits
+    if thr_size % atom_threads != 0:
+        out.append(&quot;TiledCopy uses too few thrs for selected CopyAtom&quot;)
+    if val_size % atom_vals != 0:
+        out.append(&quot;TiledCopy uses too few vals for selected CopyAtom&quot;)
+    return out
+
+
+def tile_to_shape_check(block_shape, target_shape) -&gt; list:
+    if len(block_shape) &gt; len(target_shape):
+        return [&quot;Rank of layout must be &lt;= rank of target shape.&quot;]
+    block = tuple(block_shape) + (1,) * (len(target_shape) - len(block_shape))
+    if all(t is not None for t in target_shape):
+        if any(t % b != 0 for t, b in zip(target_shape, block)):
+            return [&quot;tile_to_shape: block shape does not divide the target shape.&quot;]
+    return []
+
+
+def predict_compiles(desc):
+    kind = desc[0]
+    if kind == &quot;composition&quot;:
+        msgs = composition_check(desc[1], desc[2])
+    elif kind == &quot;swizzle&quot;:
+        msgs = swizzle_check(*desc[1:])
+    elif kind == &quot;tiled_copy&quot;:
+        msgs = tiled_copy_check(*desc[1:])
+    elif kind == &quot;tile_to_shape&quot;:
+        msgs = tile_to_shape_check(desc[1], desc[2])
+    elif kind == &quot;always_ok&quot;:
+        msgs = []
+    else:
+        raise ValueError(f&quot;unknown snippet kind {kind!r}&quot;)
+    return (not msgs, msgs[0] if msgs else &quot;&quot;)
+
+
+def check_config(cfg: GemmConfig) -&gt; list:
+    v = []
+    add = lambda code, layer, msg: v.append(Violation(code, layer, msg))
+    thr_m, thr_k = cfg.copy_thr
+    val_m, val_k = cfg.copy_val
+    elem_bits = 8 * cfg.elem_bytes
+    if cfg.swizzle is not None and swizzle_check(*cfg.swizzle):
+        add(&quot;swizzle_params&quot;, &quot;cute&quot;, swizzle_check(*cfg.swizzle)[0])
+    tc = tiled_copy_check(cfg.copy_atom_bits, elem_bits, 1, prod(cfg.copy_thr), prod(cfg.copy_val))
+    if tc:
+        add(&quot;copy_vals&quot;, &quot;cute&quot;, tc[0])
+    if prod(cfg.copy_thr) != cfg.threads:
+        add(&quot;copy_threads&quot;, &quot;cutlass&quot;, f&quot;copy thread layout has {prod(cfg.copy_thr)} threads, CTA has {cfg.threads}&quot;)
+    if 32 * prod(cfg.mma_warps) != cfg.threads:
+        add(&quot;mma_threads&quot;, &quot;cutlass&quot;, f&quot;TiledMMA needs {32 * prod(cfg.mma_warps)} threads, CTA has {cfg.threads}&quot;)
+    if cfg.BM % (thr_m * val_m) or cfg.BK % (thr_k * val_k):
+        add(&quot;copy_tile&quot;, &quot;cutlass&quot;, f&quot;copy tile {(thr_m * val_m, thr_k * val_k)} does not divide CTA tile {(cfg.BM, cfg.BK)}&quot;)
+    am, an, ak = cfg.mma_atom
+    wm, wn, wk = cfg.mma_warps
+    if cfg.BM % (am * wm) or cfg.BN % (an * wn) or cfg.BK % (ak * wk):
+        add(&quot;mma_tile&quot;, &quot;cutlass&quot;, f&quot;MMA tile {(am * wm, an * wn, ak * wk)} does not divide {(cfg.BM, cfg.BN, cfg.BK)}&quot;)
+    if val_k * cfg.elem_bytes * 8 != cfg.copy_atom_bits:
+        add(&quot;vector_bytes&quot;, &quot;cutlass&quot;, f&quot;{val_k} contiguous elements are {val_k * cfg.elem_bytes} B, atom moves {cfg.copy_atom_bits // 8} B&quot;)
+    vb = cfg.copy_atom_bits // 8
+    if (cfg.K * cfg.elem_bytes) % vb or (cfg.BK * cfg.elem_bytes) % vb:
+        add(&quot;alignment&quot;, &quot;cutlass&quot;, f&quot;row bytes are not multiples of the {vb} B vector&quot;)
+    if cfg.swizzle is not None:
+        B, Mb, S = cfg.swizzle
+        if (cfg.BM * cfg.BK) % (2 ** (B + Mb + S)):
+            add(&quot;swizzle_span&quot;, &quot;cutlass&quot;, f&quot;swizzle span 2^{B + Mb + S} elements does not divide the {cfg.BM}x{cfg.BK} tile&quot;)
+        if 2 ** Mb &lt; val_k:
+            add(&quot;swizzle_vector&quot;, &quot;cutlass&quot;, f&quot;Swizzle keeps runs of {2 ** Mb} elements, copy vector has {val_k}&quot;)
+    if cfg.use_ldmatrix:
+        bad = cfg.elem_bytes != 2 or (cfg.BK * cfg.elem_bytes) % 16
+        if cfg.swizzle is not None and 2 ** cfg.swizzle[1] * cfg.elem_bytes &lt; 16:
+            bad = True
+        if bad:
+            add(&quot;ldmatrix&quot;, &quot;cutlass&quot;, &quot;ldmatrix needs 16-byte contiguous rows of 16-bit elements&quot;)
+    smem = cfg.stages * (cfg.BM + cfg.BN) * cfg.BK * cfg.elem_bytes
+    if smem &gt; cfg.smem_limit:
+        add(&quot;smem_capacity&quot;, &quot;cutlass&quot;, f&quot;{smem} B of shared memory &gt; {cfg.smem_limit} B&quot;)
+    if cfg.M % cfg.BM or cfg.N % cfg.BN or cfg.K % cfg.BK:
+        add(&quot;ragged_tile&quot;, &quot;runtime&quot;, &quot;problem size is not a multiple of the tile: needs predication&quot;)
+    return v</code></pre></div></div></details>
+<h2 id="c2-9">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>composition 的断言写成 <code>CUTE_STATIC_ASSERT_V(cond, msg)</code>，<code>cond</code> 本身是一个 <code>C&lt;bool&gt;</code> 类型，并且包在 <code>if constexpr (is_static&lt;...&gt; and is_static&lt;...&gt;)</code> 里（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1033">composition_impl</a>）。如果去掉这层 <code>if constexpr</code>、改成普通 <code>static_assert</code>，动态 layout 会怎样？</li>
+<li>本题的 <code>mma_tile</code>、<code>vector_bytes</code>、<code>alignment</code>、<code>swizzle_span</code>、<code>swizzle_vector</code>、<code>ldmatrix</code>、<code>smem_capacity</code> 是按 CUTLASS 的写法建模的，不是真实 <code>static_assert</code>。去 <code>include/cutlass/gemm/collective/</code> 里找一找，SM90 的 collective 实际用 <code>static_assert</code> 检查了哪些？</li>
+<li>CUTLASS 3.x 的 <code>can_implement()</code> 在 host 端检查对齐和问题尺寸。哪些检查只能放在那里，不能放进 <code>static_assert</code>？</li>
+<li>如果你要写一个 autotuner，本题的 <code>check_config</code> 应该放在搜索的哪一步？它能把搜索空间缩小多少（E2 会给出答案）？</li>
+<li>CuTe DSL 里同样的错误什么时候报？是 Python tracing 时、MLIR verifier 时，还是 ptxas 时（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/pythonDSL/cute_dsl_general/dsl_code_generation.rst">dsl_code_generation.rst</a>）？</li>
+</ul>
+
+<nav class="pager"><a href="c1_static_folding.html">← 上一题 C1</a><a href="d1_tma_box.html">D1 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#c2-1">题面速览</a>
+<a class="o2" href="#c2-2">直觉与类比</a>
+<a class="o2" href="#c2-3">图解：一个配置要过的三道关</a>
+<a class="o2" href="#c2-4">逐步演示</a>
+<a class="o2" href="#c2-5">易错点</a>
+<a class="o2" href="#c2-6">上机验证</a>
+<a class="o2" href="#c2-7">三级提示</a>
+<a class="o2" href="#c2-8">参考解</a>
+<a class="o2" href="#c2-9">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

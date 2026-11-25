@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A4 · MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3 cur" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">A4 · Track A · 从零设计：五个空间映射问题 · 55 分钟 · 难</div><h1>A4 · MMA fragment：从 PTX 规则推出 TV_A / TV_B / TV_C，扩展到 2×2 warp，在寄存器里累加</h1><p class="lede">第四、第五个映射问题：Tensor Core 要的数据怎样进入线程寄存器、结果由谁持有并继续累加。本题只从 PTX 手册里的 groupID / threadID_in_group 两个公式出发，推出 m16n8k16 的 TV_A、TV_B、TV_C，再扩展成 2×2 个 warp 的 TiledMMA，最后让累加器在“寄存器”里跨 4 个 K 片累加，并和真实 CuTe 的 MMA_Traits、get_layoutX_TV、partition_A/B/C 逐个对拍。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/a4_mma_fragments.py"><code>mine/a4_mma_fragments.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_a4_mma_fragments.py"><code>tests/test_a4_mma_fragments.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/a4_mma_fragments.py"><code>solutions/a4_mma_fragments.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A4"> 我已完成这道题</label></header>
+<h2 id="a4-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：<a href="../knowledge/from_scratch.html">从零设计</a> 的第四、第五个映射问题；指令本身见 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-float">mma.sync m16n8k16 fragment 布局</a>。</li>
+<li><strong>在体系里的位置</strong>：CuTe 把这条指令的“谁持有谁”写成 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm80.hpp#L109">MMA_Traits&lt;SM80_16x8x16_F32F16F16F32_TN&gt;</a> 里的 <code>ALayout / BLayout / CLayout</code>；<code>make_tiled_mma</code> 按 AtomLayout (2,2,1) 和 <code>Tile&lt;32,32,16&gt;</code> 把它扩展到整个 CTA tile（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_atom.hpp#L531">make_tiled_mma</a>）；kernel 里用的是 <code>partition_A / partition_B / partition_C</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L62">sgemm_sm80.cu</a> 的 <code>gemm(mma, ...)</code>）。</li>
+<li><strong>你要实现</strong>：<code>group_id</code>、<code>thread_in_group</code>、<code>ptx_a/b/c</code>、<code>atom_tv</code>、<code>tiled_tv</code>、<code>registers_per_thread</code>、<code>fragment_shape</code>、<code>holders</code>、<code>warp_mma</code>、<code>cta_tile_gemm</code>、<code>valid_order</code>。IntTuple 打印函数、<code>MAPPINGS</code>、<code>DEPENDS</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li><code>groupID = lane &gt;&gt; 2</code>，<code>threadID_in_group = lane % 4</code>。A、B、C 的行列公式各不相同，不能共用一张表。</li>
+<li>atom 内用列主序偏移：A 为 <code>m + 16k</code>，B 为 <code>n + 8k</code>，C 为 <code>m + 16n</code>；TV 的一维下标是 <code>t + 32·v</code>（线程最快）。</li>
+<li>TiledMMA：<code>lane = t % 32</code>，<code>wm = (t // 32) % 2</code>，<code>wn = t // 64</code>；B 和 C 在 N 方向每个 warp 重复一次：<code>v = fv + 4·r</code>，<code>n += 8·(wn + 2r)</code>。</li>
+<li>累加器从第一个 K 片到最后一个 K 片一直留在 (128, 8) 的寄存器数组里，只在最后写回一次。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：groupID 公式与越界报错 · lane 5 的 PTX 坐标 · 三个 atom TV 与真实 <code>MMA_Traits</code> 逐项相同 · atom 覆盖整个 tile · 三个 tiled TV 与真实 <code>get_layoutX_TV</code> 相同 · 线程 0、5、37、127 的 fragment 与真实 <code>partition_A/B/C</code> 相同 · 寄存器数 4/4/8 与真实 fragment shape · A、B 每个元素有 2 个持有者，C 只有 1 个，<code>holders(&quot;C&quot;,5,7) == [(23,1)]</code> · 一条 <code>warp_mma</code> 等于 numpy 的 <code>C + A·Bᵀ</code> · 32×K 的 CTA tile GEMM 正确且 <code>mma</code>、<code>k_slices</code>、<code>acc_stores = 1024</code> 正确 · 形状错误报错 · 五个映射的依赖顺序。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>MMA</strong>（Matrix Multiply-Accumulate）：Tensor Core 指令，<code>D = A·B + C</code>。<strong>m16n8k16</strong>：一条指令算 16×8 的 C，K 方向 16。</li>
+<li><strong>lane</strong>：warp 里的线程号 0..31。<strong>fragment</strong>：一个 lane 在寄存器里持有的那几个元素。</li>
+<li><strong>accumulator</strong>：保存部分和的 C fragment，跨 K 循环一直留在寄存器里。</li>
+<li><strong>TiledMMA</strong>：多个 MMA atom 按 AtomLayout 排列、再按 Tile 重复，覆盖整个 CTA tile 的 TV 分布。</li>
+</ul>
+</div>
+<h2 id="a4-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 32 人合拼一张拼图</div><p>一条 <code>mma.sync</code> 是 32 个人（lane）同时拼一张拼图。规则写在说明书（PTX 手册）上：每 4 个人一组（groupID），组里第几个（threadID_in_group）决定你拿哪两列。A 是一张 16×16 的图，每人手里 8 块；B 是 8×16，每人 4 块；结果 C 是 16×8，每人保管 4 块。三张图的分法不同，所以有三张对照表（TV_A、TV_B、TV_C）。4 个小组（warp）排成 2×2 去拼 32×32 的大图时，每个组在 N 方向还要拼两次；做完一轮 K 不交卷，拿着手里的 C 块继续拼下一轮，四轮之后才交卷（写回全局内存）。</p>
+</div>
+<h2 id="a4-3">图解：从 lane 到 tile 坐标</h2>
+
+<figure class="flow"><div class="flow-head">一个 (t, v) 怎样变成 C tile 的坐标<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;一个 (t, v) 怎样变成 C tile 的坐标&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;t&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;线程 t&quot;, &quot;s&quot;: &quot;0..127&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;lane&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;lane = t % 32&quot;, &quot;s&quot;: &quot;g = lane&gt;&gt;2, q = lane%4&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;warp (wm, wn)&quot;, &quot;s&quot;: &quot;(t//32)%2, t//64&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;atom&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;atom 坐标&quot;, &quot;s&quot;: &quot;PTX 行列公式&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tile&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;tile 坐标&quot;, &quot;s&quot;: &quot;m+16wm, n+8(wn+2r)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;t&quot;, &quot;b&quot;: &quot;lane&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;lane&quot;, &quot;b&quot;: &quot;atom&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;atom&quot;, &quot;b&quot;: &quot;tile&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;tile&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 240.0, &quot;rh&quot;: 96.0, &quot;nw&quot;: 190.0}}"></div><figcaption>真实 CuTe 的 <code>thr_layout_vmnk</code> 是 <code>(_32,_2,_2,_1):(_1,_32,_64,_0)</code>：lane 最快，然后是 M 方向的 warp，再是 N 方向的 warp。<code>v = fv + 4r</code> 里的 r 是 <code>Tile&lt;32,32,16&gt;</code> 带来的 N 方向重复。</figcaption></figure>
+<h2 id="a4-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ lane 5、线程 37、元素 C[5][7]</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;l5&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;lane 5&quot;, &quot;s&quot;: &quot;g = 1, q = 1&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;af&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;A fragment&quot;, &quot;s&quot;: &quot;8 个 half&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;t37&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;线程 37 的 C&quot;, &quot;s&quot;: &quot;wm = 1, wn = 0&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;hold&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;谁持有 C[5][7]&quot;, &quot;s&quot;: &quot;唯一：(23, 1)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kl&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;K 循环&quot;, &quot;s&quot;: &quot;4 片，累加在寄存器&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;l5&quot;, &quot;b&quot;: &quot;af&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;af&quot;, &quot;b&quot;: &quot;t37&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t37&quot;, &quot;b&quot;: &quot;hold&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;hold&quot;, &quot;b&quot;: &quot;kl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 185.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 160.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="l5"><div class="step-title">1. lane 5</div><p><code>group_id(5) = 1</code>，<code>thread_in_group(5) = 1</code>。真实 CuTe 的 <code>ALayout = ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128))</code>：线程模式 <code>(4,8):(32,1)</code> 正好是“q 乘 32（两列 = 32 个列主序偏移）、g 乘 1（行）”。</p>
+</div><div class="step" data-hl="l5,af"><div class="step-title">2. A fragment</div><p><code>[ptx_a(5, i) for i in range(8)] = [(1,2), (1,3), (9,2), (9,3), (1,10), (1,11), (9,10), (9,11)]</code>。CuTe 的 <code>ALayout(5, 2) = 41</code>，<code>41 % 16 = 9</code>、<code>41 // 16 = 2</code>，即 (9, 2)，和第 2 个值一致。每个 lane 8 个 half = 4 个 32 位寄存器。</p>
+</div><div class="step" data-hl="af,t37"><div class="step-title">3. 扩展到 2×2 warp</div><p>线程 37：lane 5、<code>wm = 1</code>、<code>wn = 0</code>。真实 <code>partition_C</code> 给出它的 8 个累加器坐标：<code>(17,2) (17,3) (25,2) (25,3) (17,18) (17,19) (25,18) (25,19)</code>。前 4 个是 atom 坐标的行加 16，后 4 个再在 N 方向加 16（r = 1）。</p>
+</div><div class="step" data-hl="t37,hold"><div class="step-title">4. 持有者</div><p><code>holders(&quot;C&quot;, 5, 7) = [(23, 1)]</code>：C 的每个元素只有一个持有者。A 不一样：<code>holders(&quot;A&quot;, 9, 2) = [(5, 2), (69, 2)]</code>，N 方向的两个 warp 都要同一行 A；B 同理 <code>holders(&quot;B&quot;, 1, 2) = [(5, 0), (37, 0)]</code>。这就是文档说的“A/B fragment 可能在多个线程间复制”。</p>
+</div><div class="step" data-hl="hold,kl"><div class="step-title">5. 在寄存器里累加</div><p><code>cta_tile_gemm(A, B)</code>（A、B 都是 32×64）：每个 K 片 4 个 warp 各发 2 条 <code>mma.sync</code>，4 个 K 片一共 <code>mma = 32</code> 条；累加器 (128, 8) 从头到尾不离开“寄存器”，最后写回 <code>acc_stores = 1024</code> 次，恰好是 32×32 个元素各一次。</p>
+</div></div></div>
+<h2 id="a4-5">易错点</h2>
+<ul>
+<li><strong>A、B、C 共用一个行列公式。</strong> A 的行是 <code>g + 8·((i&gt;&gt;1)&amp;1)</code>，C 的行是 <code>g + 8·(i&gt;&gt;1)</code>：值的编号顺序不同。测试 <code>test_ptx_examples</code> 逐个比较 lane 5。</li>
+<li><strong>把 B 当成 K×N 存。</strong> TN 的 B 以 N×K 存放，本题统一用 (n, k)，偏移 <code>n + 8k</code>。测试 <code>test_atom_tv_matches_mma_traits[B]</code>。</li>
+<li><strong>以为 C 也有复制。</strong> A、B 有 2 个持有者，C 只有 1 个。测试 <code>test_replication_counts</code>、<code>test_holders_of_a_element_are_replicated_across_n_warps</code>。</li>
+<li><strong>TiledMMA 只按 warp 编号平移。</strong> <code>Tile&lt;32,32,16&gt;</code> 让 N 方向每个 warp 重复一次，B 和 C 的每线程值数从 4 变成 8。测试 <code>test_tiled_tv_matches_get_layoutX_TV</code>、<code>test_registers_and_fragment_shapes</code>（C 的 fragment shape 是 <code>((_2,_2),_1,_2)</code>）。</li>
+<li><strong>每个 K 片写回一次 C。</strong> 测试要求 <code>acc_stores == 1024</code>，即只在最后写一次。</li>
+</ul>
+<h2 id="a4-6">对照文档</h2>
+<blockquote>
+<p>“因此需要分别描述三套映射：TV_A: (t,v) → (m,k)，TV_B: (t,v) → (n,k)，TV_C: (t,v) → (m,n)。A、B、C 的分布不相同……不能随意把 A/B/C 的 TV Layout 当成同一张表。”</p>
+<p>“高性能 kernel 不应该每轮都把部分 C 写回 Global Memory……acc_next = MMA(A_tile, B_tile, acc_current)。”</p>
+</blockquote>
+<p>本题把“三套映射”落成了三个可以和真实 CuTe 逐项对拍的函数，“分布不相同”体现在持有者个数（A/B 2 个，C 1 个）；“累加器留在寄存器”体现在 <code>acc_stores = 1024</code>。</p>
+<h2 id="a4-7">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/a4_mma_fragments.cpp   # 真实 CuTe，本机编译运行
+./check.sh oracle a4                                # 重新生成 tests/golden/a4_mma_fragments.json
+</code></pre>
+<p>本机的真实输出：</p>
+<pre><code class="language-text">atom A TV: ((_4,_8),(_2,_2,_2)):((_32,_1),(_16,_8,_128))
+atom B TV: ((_4,_8),(_2,_2)):((_16,_1),(_8,_64))
+atom C TV: ((_4,_8),(_2,_2)):((_32,_1),(_16,_8))
+tiled A TV: ((_4,_8,_2,_2),((_2,_2,_2),(_1,_1))):((_64,_1,_16,_0),((_32,_8,_256),(_0,_0)))
+A(9,2) is value 2 of thread 5
+C(5,7) is value 1 of thread 23
+A(9,2) is value 2 of thread 69
+partition_fragment_A shape: ((_2,_2,_2),_1,_1)
+</code></pre>
+<p>读 CLayout 的值模式 <code>(_2,_2):(_16,_8)</code>：第一个 2 是“列 +1”（列主序偏移 +16），第二个 2 是“行 +8”，和 PTX 的 <code>col = 2q + (i&amp;1)</code>、<code>row = g + 8(i&gt;&gt;1)</code> 一一对应。tiled A TV 里 N 方向 warp 的 stride 是 <code>_0</code>：这就是 A 被两个 warp 复制的代数表达。</p>
+<h2 id="a4-8">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">[ptx_c(5, i) for i in range(4)]      # [(1, 2), (1, 3), (9, 2), (9, 3)]
+atom_tv(&quot;A&quot;)[:8]                     # [0, 32, 64, 96, 1, 33, 65, 97]
+tiled_tv(&quot;C&quot;)[37::128]               # [81, 113, 89, 121, 593, 625, 601, 633]
+holders(&quot;A&quot;, 9, 2)                   # [(5, 2), (69, 2)]
+registers_per_thread()               # {'A': 4, 'B': 4, 'C': 8}
+fragment_shape(&quot;B&quot;)                  # ((2, 2), 2, 1)
+cta_tile_gemm(A, B)[1]               # {'mma': 32, 'k_slices': 4, 'acc_stores': 1024}
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>为什么 ALayout 的线程模式是 <code>(4,8):(32,1)</code> 而不是 <code>(32):(1)</code>？</li>
+<li>为什么 A 的元素有两个持有者、C 只有一个？如果 AtomLayout 改成 (4,1,1)，A 和 B 的复制个数会怎样变？</li>
+<li><code>fragment_shape(&quot;C&quot;) = ((2,2),1,2)</code> 的三个模式分别是什么？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li>先写 <code>ptx_a/b/c</code>：检查 <code>0 ≤ lane &lt; 32</code>、<code>0 ≤ i &lt; V</code>，直接套公式。</li>
+<li><code>atom_tv(which)</code>：<code>out[t + 32·v] = 列主序偏移(ptx_x(t, v))</code>。</li>
+<li><code>tiled_tv(which)</code>：对每个 <code>t &lt; 128</code>、<code>v &lt; 8</code>，先用 <code>lane, wm, wn</code> 和 <code>fv = v % 4, r = v // 4</code>（A 不拆 v）求 atom 坐标，再平移到 tile；偏移是 <code>m + 32·k</code>（A、B）或 <code>m + 32·n</code>（C）。</li>
+<li><code>holders</code>：遍历 <code>tiled_tv</code>，收集偏移等于目标的 (t, v)。</li>
+<li><code>warp_mma</code>：把 32 个 lane 的片段按 <code>ptx_x</code> 放回 16×16、8×16、16×8 的矩阵，算 <code>C + A·Bᵀ</code>，再按 <code>ptx_c</code> 拆回 (32, 4)。</li>
+<li><code>cta_tile_gemm</code>：累加器 <code>acc = zeros((128, 8))</code>；每个 K 片、每个 warp、每个 r，从 A、B 取出该 warp 的片段，调一次 <code>warp_mma</code>，结果写回 acc 的对应 4 列；最后按 <code>tiled_tv(&quot;C&quot;)</code> 写回 C。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>列主序偏移 <code>m + 16k</code> 里，lane 的 q 管“两列”（偏移 +32），g 管“行”（偏移 +1）。线程号 <code>lane = q + 4g</code> 按 colex 拆成 (q, g)，所以是 <code>(4,8):(32,1)</code>：CuTe 不需要分段公式，一个两层的 layout 就把 PTX 规则写完了。</li>
+<li>AtomLayout (2,2,1) 有两个 N 方向的 warp，它们算的是 C 的不同列，但需要同一行 A，所以 A 被复制 2 份；同理 B 被 M 方向的两个 warp 复制。C 的每个元素只由一个 warp 计算。改成 (4,1,1) 后 A 不再复制、B 被 4 个 warp 复制（当然 tile 形状也要跟着变）。</li>
+<li>(2,2) 是一条 atom 的 4 个值（列 +1、行 +8），第二个模式 1 是 M 方向的重复次数，第三个模式 2 是 N 方向的重复（<code>Tile&lt;32,32,16&gt;</code> 带来的 r）。</li>
+</ol>
+</div></details></div></details>
+<h2 id="a4-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/a4_mma_fragments.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a4_mma_fragments.py</span><span class="muted small">291 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A4 · MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 个 warp — reference solution.
+
+第四个映射问题：Tensor Core 要求的数据怎样进入线程寄存器？SM80 的 mma.sync.m16n8k16 由一个 warp 的 32 个
+lane 协作完成，每个 lane 只在寄存器里持有 A、B、C 的几个元素。PTX ISA 用两个量描述“谁持有谁”：
+    groupID           = lane &gt;&gt; 2        （0..7，同一组 4 个 lane）
+    threadID_in_group = lane %  4        （0..3）
+本题先只用这两个公式（第一性原理）写出 TV 映射，再和 CuTe 的 MMA_Traits&lt;SM80_16x8x16_F32F16F16F32_TN&gt;
+（include/cute/atom/mma_traits_sm80.hpp）以及 make_tiled_mma(..., Layout&lt;(2,2,1)&gt;, Tile&lt;32,32,16&gt;) 的
+get_layoutA/B/C_TV 对拍（golden 由 oracle/a4_mma_fragments.cpp 用真实 CuTe 生成）。
+
+PTX 的 fragment 规则（f16 输入、f32 累加，“TN”：A 是 M×K 行、B 以 N×K 存放）
+- A（16×16，每 lane 8 个 half，寄存器 a0..a7）：
+      row = groupID + 8·((i &gt;&gt; 1) &amp; 1)，  col = 2·threadID_in_group + (i &amp; 1) + 8·(i &gt;&gt; 2)
+- B（K×N = 16×8，每 lane 4 个 half，b0..b3）；本题用 (n, k) 表示（B 以 N×K 存放）：
+      n = groupID，  k = 2·threadID_in_group + (i &amp; 1) + 8·(i &gt;&gt; 1)
+- C（16×8，每 lane 4 个 float，c0..c3）：
+      row = groupID + 8·(i &gt;&gt; 1)，  col = 2·threadID_in_group + (i &amp; 1)
+
+约定
+- atom 内的“列主序偏移”：A 为 m + 16·k，B 为 n + 8·k，C 为 m + 16·n。
+- TV 的一维下标 i = t + T·v（线程维变化最快，CuTe 的 colex 约定）；atom_tv(which) 返回长度32·V 的偏移列表。
+- TiledMMA：AtomLayout (2,2,1) 把 4 个 warp 排成 2×2，Tile&lt;32,32,16&gt; 让每个 warp 在 N方向重复一次。
+  线程 t：lane = t % 32，warp 在 M 方向的坐标 wm = (t // 32) % 2，在 N 方向的坐标 wn = t// 64。
+  - A（tile 32×16，偏移 m + 32·k）：V = 8，值 v 就是 atom 的 a_v；(m, k) = (am + 16·wm,ak)。
+  - B（tile 32×16 的 (n, k)，偏移 n + 32·k）：V = 8，v = fv + 4·r（fv ∈ 0..3, r ∈ 0..1）：
+      (n, k) = (bn + 8·(wn + 2·r), bk)
+  - C（tile 32×32，偏移 m + 32·n）：V = 8，v = fv + 4·r：(m, n) = (cm + 16·wm, cn + 8·(wn + 2·r))
+  其中 (am, ak)、(bn, bk)、(cm, cn) 是 atom 内坐标。这与真实 CuTe 的 get_layoutX_TV 完全一致。
+- 寄存器计数（每线程，32 位寄存器）：A 8 个 half = 4 个，B 8 个 half = 4 个，C 8 个 float =8 个。
+- fragment_shape(which)：partition_fragment_X 的 shape，按 CuTe 的 (MMA_V, MMA_M, MMA_N 或 MMA_K) 排列：
+  A ((2,2,2),1,1)，B ((2,2),2,1)，C ((2,2),1,2)。
+- 五个映射的依赖顺序（文档第 2 节）：MAPPINGS 按“先 CTA tile，再 copy，再 SMEM，再 MMA 输入，最后累加器”排列；
+  DEPENDS[x] 列出 x 依赖的映射。valid_order(order) 判断一个顺序是否满足所有依赖（每个映射出现一次）。
+
+API
+    MAPPINGS, DEPENDS                                       given
+    group_id(lane), thread_in_group(lane)                   lane → (groupID, threadID_in_group)
+    ptx_a(lane, i) -&gt; (m, k) ; ptx_b(lane, i) -&gt; (n, k) ; ptx_c(lane, i) -&gt; (m, n)
+    atom_tv(which) -&gt; list[int]                             which ∈ {&quot;A&quot;,&quot;B&quot;,&quot;C&quot;}
+    tiled_tv(which) -&gt; list[int]                            128 个线程的 TV 偏移（见上）
+    registers_per_thread() -&gt; dict                          {&quot;A&quot;: 4, &quot;B&quot;: 4, &quot;C&quot;:8}
+    fragment_shape(which) -&gt; IntTuple
+    holders(which, r, c) -&gt; list[(t, v)]                    tiled 映射里持有 tile 元素 (r, c) 的所有 (t, v)
+    warp_mma(a_frag, b_frag, c_frag) -&gt; c_frag              一条 mma.sync：输入每 lane 的片段 (32,8)/(32,4)/(32,4)
+    cta_tile_gemm(A, B) -&gt; (C_tile, stats)                  A、B 是 (32, K) 的 numpy数组（B 以 N×K 存放），
+                                                            K 是 16 的倍数；累加器一直留在 (128, 8) 的“寄存器”里；
+                                                            stats = {&quot;mma&quot;: mma.sync 条数, &quot;k_slices&quot;: K/16,
+                                                                     &quot;acc_stores&quot;:写回 C 的次数（= 1024）}
+    valid_order(order) -&gt; bool
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import numpy as np
+
+def is_tuple(x) -&gt; bool:
+    return isinstance(x, tuple)
+
+
+def flatten(t) -&gt; tuple:
+    &quot;&quot;&quot;(2, (3, 4)) -&gt; (2, 3, 4);  5 -&gt; (5,).&quot;&quot;&quot;
+    if not is_tuple(t):
+        return (t,)
+    out = ()
+    for e in t:
+        out += flatten(e)
+    return out
+
+
+def fmt_tuple(t, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;Format an IntTuple the way cute::print does: (_2,(_3,_4)) for static ints.&quot;&quot;&quot;
+    if is_tuple(t):
+        return &quot;(&quot; + &quot;,&quot;.join(fmt_tuple(e, static) for e in t) + &quot;)&quot;
+    return (&quot;_&quot; if static else &quot;&quot;) + str(t)
+
+
+def fmt_layout(shape, stride, static: bool = True) -&gt; str:
+    &quot;&quot;&quot;cute::print of a Layout: &quot;&lt;shape&gt;:&lt;stride&gt;&quot;.&quot;&quot;&quot;
+    return fmt_tuple(shape, static) + &quot;:&quot; + fmt_tuple(stride, static)
+
+
+def parse_tuple(s: str):
+    &quot;&quot;&quot;Inverse of fmt_tuple. Accepts &#x27;_4&#x27; or &#x27;4&#x27;. &#x27;(_2,(_3,_4))&#x27; -&gt; (2, (3, 4)).&quot;&quot;&quot;
+    s = s.strip()
+    pos = 0
+
+    def parse():
+        nonlocal pos
+        if s[pos] == &quot;(&quot;:
+            pos += 1
+            items = []
+            while s[pos] != &quot;)&quot;:
+                items.append(parse())
+                if s[pos] == &quot;,&quot;:
+                    pos += 1
+            pos += 1
+            return tuple(items)
+        start = pos
+        while pos &lt; len(s) and s[pos] not in &quot;,)&quot;:
+            pos += 1
+        tok = s[start:pos].lstrip(&quot;_&quot;)
+        return int(tok)
+
+    v = parse()
+    if pos != len(s):
+        raise ValueError(f&quot;trailing characters in {s!r}&quot;)
+    return v
+
+
+def parse_layout(s: str):
+    &quot;&quot;&quot;&#x27;(_4,_8):(_8,_1)&#x27; -&gt; ((4, 8), (8, 1)). A swizzled/composed layout is not accepted.&quot;&quot;&quot;
+    shape_s, stride_s = _split_top_colon(s.strip())
+    return parse_tuple(shape_s), parse_tuple(stride_s)
+
+
+def _split_top_colon(s: str):
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == &quot;(&quot;:
+            depth += 1
+        elif ch == &quot;)&quot;:
+            depth -= 1
+        elif ch == &quot;:&quot; and depth == 0:
+            return s[:i], s[i + 1:]
+    raise ValueError(f&quot;no top-level &#x27;:&#x27; in {s!r}&quot;)
+
+
+MAPPINGS = [&quot;cta_tile&quot;, &quot;copy_tv&quot;, &quot;smem_layout&quot;, &quot;mma_operand_tv&quot;, &quot;accumulator_tv&quot;]
+DEPENDS = {
+    &quot;cta_tile&quot;: [],
+    &quot;copy_tv&quot;: [&quot;cta_tile&quot;],                       # 先知道 CTA 算哪块，才知道要搬什么
+    &quot;smem_layout&quot;: [&quot;copy_tv&quot;],                    # copy 的目的地是 SMEM 地址
+    &quot;mma_operand_tv&quot;: [&quot;smem_layout&quot;],             # SMEM 里有什么，才能谈怎样喂给 MMA
+    &quot;accumulator_tv&quot;: [&quot;mma_operand_tv&quot;],          # 累加器的分布由 MMA 指令决定
+}
+
+
+def group_id(lane: int) -&gt; int:
+    &quot;&quot;&quot;PTX groupID = lane &gt;&gt; 2.&quot;&quot;&quot;
+    if not 0 &lt;= lane &lt; 32:
+        raise ValueError(&quot;lane must be in [0, 32)&quot;)
+    return lane &gt;&gt; 2
+
+
+def thread_in_group(lane: int) -&gt; int:
+    &quot;&quot;&quot;PTX threadID_in_group = lane % 4.&quot;&quot;&quot;
+    if not 0 &lt;= lane &lt; 32:
+        raise ValueError(&quot;lane must be in [0, 32)&quot;)
+    return lane &amp; 3
+
+
+def ptx_a(lane: int, i: int):
+    &quot;&quot;&quot;A fragment a_i of `lane`: (row m, col k) in the 16x16 A atom.&quot;&quot;&quot;
+    if not 0 &lt;= i &lt; 8:
+        raise ValueError(&quot;A has 8 values per lane&quot;)
+    g, q = group_id(lane), thread_in_group(lane)
+    # 每个 32 位寄存器装 2 个相邻 K 的 half（i &amp; 1）；a2/a3 是下半个 16×8 块（行 +8）；a4..a7 是 K 的后 8 列。
+    return g + 8 * ((i &gt;&gt; 1) &amp; 1), 2 * q + (i &amp; 1) + 8 * (i &gt;&gt; 2)
+
+
+def ptx_b(lane: int, i: int):
+    &quot;&quot;&quot;B fragment b_i of `lane`: (n, k) in the 8x16 B atom (B stored N x K).&quot;&quot;&quot;
+    if not 0 &lt;= i &lt; 4:
+        raise ValueError(&quot;B has 4 values per lane&quot;)
+    g, q = group_id(lane), thread_in_group(lane)
+    return g, 2 * q + (i &amp; 1) + 8 * (i &gt;&gt; 1)
+
+
+def ptx_c(lane: int, i: int):
+    &quot;&quot;&quot;C fragment c_i of `lane`: (m, n) in the 16x8 C atom.&quot;&quot;&quot;
+    if not 0 &lt;= i &lt; 4:
+        raise ValueError(&quot;C has 4 values per lane&quot;)
+    g, q = group_id(lane), thread_in_group(lane)
+    return g + 8 * (i &gt;&gt; 1), 2 * q + (i &amp; 1)
+
+
+def atom_tv(which: str):
+    &quot;&quot;&quot;Atom TV map: offsets[t + 32 v] = column-major offset of value v of lanet.&quot;&quot;&quot;
+    if which == &quot;A&quot;:
+        V, f, rows = 8, ptx_a, 16
+    elif which == &quot;B&quot;:
+        V, f, rows = 4, ptx_b, 8
+    elif which == &quot;C&quot;:
+        V, f, rows = 4, ptx_c, 16
+    else:
+        raise ValueError(which)
+    out = [0] * (32 * V)
+    for v in range(V):
+        for t in range(32):
+            r, c = f(t, v)
+            out[t + 32 * v] = r + rows * c          # CuTe 的 atom layout 输出的就是这个列主序偏移
+    return out
+
+
+def tiled_tv(which: str):
+    &quot;&quot;&quot;TV map of make_tiled_mma(atom, Layout&lt;(2,2,1)&gt;, Tile&lt;32,32,16&gt;) for A, B or C.&quot;&quot;&quot;
+    T, V = 128, 8
+    out = [0] * (T * V)
+    for t in range(T):
+        lane, wm, wn = t % 32, (t // 32) % 2, t // 64
+        for v in range(V):
+            if which == &quot;A&quot;:
+                am, ak = ptx_a(lane, v)
+                r, c = am + 16 * wm, ak                     # A 与 wn 无关：两个 N 方向的 warp 拿到同样的 A
+            elif which == &quot;B&quot;:
+                fv, rep = v % 4, v // 4
+                bn, bk = ptx_b(lane, fv)
+                r, c = bn + 8 * (wn + 2 * rep), bk          # B 与 wm 无关；Tile&lt;32&gt;让每个 warp 在 N 上重复一次
+            elif which == &quot;C&quot;:
+                fv, rep = v % 4, v // 4
+                cm, cn = ptx_c(lane, fv)
+                r, c = cm + 16 * wm, cn + 8 * (wn + 2 * rep)
+            else:
+                raise ValueError(which)
+            out[t + T * v] = r + 32 * c
+    return out
+
+
+def registers_per_thread():
+    &quot;&quot;&quot;32-bit registers per thread for the A, B, C fragments of the tiled MMA.&quot;&quot;&quot;
+    # half 是 16 位：两个 half 装一个 32 位寄存器；float 累加器每个值一个寄存器。
+    return {&quot;A&quot;: 8 // 2, &quot;B&quot;: 8 // 2, &quot;C&quot;: 8}
+
+
+def fragment_shape(which: str):
+    &quot;&quot;&quot;Shape of partition_fragment_X: (MMA_V, MMA_M, MMA_N or MMA_K).&quot;&quot;&quot;
+    # 第一维是 atom 内每 lane 的值（按 PTX 寄存器的分组嵌套），后两维是这个线程在 tile 里重复了几次 atom。
+    return {&quot;A&quot;: ((2, 2, 2), 1, 1), &quot;B&quot;: ((2, 2), 2, 1), &quot;C&quot;: ((2, 2), 1, 2)}[which]
+
+
+def holders(which: str, r: int, c: int):
+    &quot;&quot;&quot;All (t, v) whose tiled-TV entry is tile element (r, c).&quot;&quot;&quot;
+    tv = tiled_tv(which)
+    target = r + 32 * c
+    return [(i % 128, i // 128) for i, off in enumerate(tv) if off == target]
+
+
+def warp_mma(a_frag, b_frag, c_frag):
+    &quot;&quot;&quot;One mma.sync.m16n8k16: gather the lanes&#x27; fragments into A (16x16), B (8x16),add A·Bᵀ into C.&quot;&quot;&quot;
+    a_frag, b_frag, c_frag = np.asarray(a_frag), np.asarray(b_frag), np.asarray(c_frag)
+    a, b = np.zeros((16, 16)), np.zeros((8, 16))
+    for lane in range(32):
+        for i in range(8):
+            a[ptx_a(lane, i)] = a_frag[lane, i]
+        for i in range(4):
+            b[ptx_b(lane, i)] = b_frag[lane, i]
+    c = a @ b.T
+    out = c_frag.astype(np.float64).copy()
+    for lane in range(32):
+        for i in range(4):
+            out[lane, i] += c[ptx_c(lane, i)]            # 每个 lane 只更新自己持有的4 个累加器
+    return out
+
+
+def cta_tile_gemm(A, B):
+    &quot;&quot;&quot;32x32 C tile = A · Bᵀ with the accumulator kept in per-thread registers across K slices.&quot;&quot;&quot;
+    A, B = np.asarray(A, dtype=np.float64), np.asarray(B, dtype=np.float64)
+    if A.shape[0] != 32 or B.shape[0] != 32 or A.shape[1] != B.shape[1] or A.shape[1] % 16:
+        raise ValueError(&quot;A and B must be (32, K) with K a multiple of 16&quot;)
+    tvA, tvB, tvC = tiled_tv(&quot;A&quot;), tiled_tv(&quot;B&quot;), tiled_tv(&quot;C&quot;)
+    acc = np.zeros((128, 8))                              # 累加器：整个 K 循环都留在“寄存器”里
+    n_mma = 0
+    for ks in range(A.shape[1] // 16):
+        a_t, b_t = A[:, 16 * ks:16 * ks + 16], B[:, 16 * ks:16 * ks + 16]
+        rA = np.array([[a_t[tvA[t + 128 * v] % 32, tvA[t + 128 * v] // 32] for v in range(8)] for t in range(128)])
+        rB = np.array([[b_t[tvB[t + 128 * v] % 32, tvB[t + 128 * v] // 32] for v in range(8)] for t in range(128)])
+        for w in range(4):
+            lanes = slice(32 * w, 32 * w + 32)
+            for rep in range(2):                          # Tile&lt;32&gt; 在 N 方向的两次重复 = 两条 mma.sync
+                c_part = acc[lanes, 4 * rep:4 * rep + 4]
+                acc[lanes, 4 * rep:4 * rep + 4] = warp_mma(rA[lanes], rB[lanes, 4 *rep:4 * rep + 4], c_part)
+                n_mma += 1
+    C = np.zeros((32, 32))
+    stores = 0
+    for t in range(128):
+        for v in range(8):
+            off = tvC[t + 128 * v]
+            C[off % 32, off // 32] = acc[t, v]            # K 全部完成后才写回一次
+            stores += 1
+    return C, {&quot;mma&quot;: n_mma, &quot;k_slices&quot;: A.shape[1] // 16, &quot;acc_stores&quot;: stores}
+
+
+def valid_order(order) -&gt; bool:
+    &quot;&quot;&quot;True iff `order` lists every mapping once and each appears after everything it depends on.&quot;&quot;&quot;
+    if sorted(order) != sorted(MAPPINGS) or len(order) != len(MAPPINGS):
+        return False
+    seen = set()
+    for x in order:
+        if any(d not in seen for d in DEPENDS[x]):
+            return False
+        seen.add(x)
+    return True</code></pre></div></div></details>
+<h2 id="a4-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>SM80 的路径里 SMEM → 寄存器通常用 <code>ldmatrix</code>（<code>SM75_U32x4_LDSM_N</code>）。它的 TV layout 和 MMA 的 A fragment 是什么关系？对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L62">sgemm_sm80.cu</a> 的 s2r copy 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L424">make_tiled_copy_A</a>。</li>
+<li><code>get_layoutC_TV</code> 是怎样由 <code>thrfrg_C</code> 和线程编号重排构造的？读 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_atom.hpp#L399">mma_atom.hpp</a>。</li>
+<li>如果累加器换成 f16（<code>SM80_16x8x16_F16F16F16F16_TN</code>），每线程 C 的寄存器数怎样变？精度上要付出什么？</li>
+<li>每个线程 8 个 f32 累加器只是 32×32 tile 的情况；tile 放大到 128×128、4 个 warp 时，每线程多少个累加器？寄存器压力在什么时候导致 spill？</li>
+</ul>
+
+<nav class="pager"><a href="a3_smem_swizzle.html">← 上一题 A3</a><a href="a5_assemble_gemm.html">A5 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#a4-1">题面速览</a>
+<a class="o2" href="#a4-2">直觉与类比</a>
+<a class="o2" href="#a4-3">图解：从 lane 到 tile 坐标</a>
+<a class="o2" href="#a4-4">逐步演示</a>
+<a class="o2" href="#a4-5">易错点</a>
+<a class="o2" href="#a4-6">对照文档</a>
+<a class="o2" href="#a4-7">上机验证</a>
+<a class="o2" href="#a4-8">三级提示</a>
+<a class="o2" href="#a4-9">参考解</a>
+<a class="o2" href="#a4-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

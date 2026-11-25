@@ -1,0 +1,257 @@
+{
+ "source": "clang++ -fsyntax-only against the pinned CuTe headers",
+ "snippets": {
+  "comp_coalesced_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "comp_dynamic_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "comp_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "comp_shape_fail": {
+   "compiles": false,
+   "message": "Shape Divisibility Condition"
+  },
+  "comp_stride_fail": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "local_tile_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "local_tile_ragged": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_00": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "sweep_01": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_02": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_03": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_04": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_05": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_06": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_07": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_08": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_09": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_10": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_11": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_12": {
+   "compiles": false,
+   "message": "Shape Divisibility Condition"
+  },
+  "sweep_13": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_14": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_15": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_16": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_17": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_18": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_19": {
+   "compiles": false,
+   "message": "Shape Divisibility Condition"
+  },
+  "sweep_20": {
+   "compiles": false,
+   "message": "Shape Divisibility Condition"
+  },
+  "sweep_21": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_22": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "sweep_23": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_24": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_25": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_26": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_27": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_28": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_29": {
+   "compiles": false,
+   "message": "Shape Divisibility Condition"
+  },
+  "sweep_30": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "sweep_31": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_32": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_33": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_34": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_35": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "sweep_36": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_37": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_38": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_39": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_40": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_41": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_42": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_43": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_44": {
+   "compiles": false,
+   "message": "Stride Divisibility Condition"
+  },
+  "sweep_45": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_46": {
+   "compiles": true,
+   "message": ""
+  },
+  "sweep_47": {
+   "compiles": true,
+   "message": ""
+  },
+  "swizzle_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "swizzle_shift_fail": {
+   "compiles": false,
+   "message": "abs(SShift) must be more than BBits."
+  },
+  "tile_to_shape_fail": {
+   "compiles": false,
+   "message": "tile_to_shape: block shape does not divide the target shape."
+  },
+  "tile_to_shape_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "tiled_copy_ok": {
+   "compiles": true,
+   "message": ""
+  },
+  "tiled_copy_vec_fail": {
+   "compiles": false,
+   "message": "TiledCopy uses too few vals for selected CopyAtom"
+  },
+  "tiled_mma_bad_tile": {
+   "compiles": true,
+   "message": ""
+  },
+  "tiled_mma_ok": {
+   "compiles": true,
+   "message": ""
+  }
+ }
+}

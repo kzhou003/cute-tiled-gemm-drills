@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D2 · mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3 cur" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">D2 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 60 分钟 · 难</div><h1>D2 · mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</h1><p class="lede">TMA 是异步的：指令发出去就返回，数据几百个周期后才落地。要让搬运和计算重叠，就得有 S 个 SMEM stage 轮流用，并且用屏障保证“没到的不读、没用完的不覆盖”。本题复刻 Hopper 的 mbarrier 语义和 CUTLASS 的 PipelineState / PipelineTmaAsync 协议（PipelineState 与真实 CUTLASS 逐步对拍），再用离散事件模拟主循环：算出 ceil(L/T)+1 这个 stage 数从哪来，并亲手造出死锁和数据竞争。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d2_mbarrier_pipeline.py"><code>mine/d2_mbarrier_pipeline.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d2_mbarrier_pipeline.py"><code>tests/test_d2_mbarrier_pipeline.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d2_mbarrier_pipeline.py"><code>solutions/d2_mbarrier_pipeline.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D2"> 我已完成这道题</label></header>
+<h2 id="d2-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：先读 <a href="../knowledge/time_dimension.html">时间维度</a> 的 pipeline 一节，再做完 D1（expect_tx 字节数从那里来）。</li>
+<li><strong>在体系里的位置</strong>：Hopper GEMM 的主循环由 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L289">PipelineTmaAsync</a> 驱动；循环变量是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L171">PipelineState</a>，生产者的起点由 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L272">make_producer_start_state</a> 给出。屏障本身是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L577">ClusterTransactionBarrier</a>，底层是 PTX 的 <code>mbarrier.*</code> 指令。</li>
+<li><strong>你要实现</strong>：<code>MBarrier</code>（<code>arrive</code>、<code>expect_tx</code>、<code>arrive_and_expect_tx</code>、<code>complete_tx</code>、<code>try_wait</code>）、<code>PipelineState</code>（<code>increment</code>、<code>advance</code>、<code>as_tuple</code>）、<code>producer_start_state</code>、<code>simulate</code>、<code>predicted_interval</code>、<code>min_stages</code>。三个异常类和 <code>SimResult</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>phase 完成 = 待到达数为 0 且 tx 字节为 0；<code>try_wait(p) == (completed % 2 != p)</code>。</li>
+<li><code>PipelineState</code> 的 index 到 S 回 0 时翻转 phase；生产者从 phase 1 起步，消费者从 phase 0 起步。</li>
+<li>生产者：等 <code>empty[i]</code> → <code>full[i].arrive_and_expect_tx</code> → 发 TMA；消费者：等 <code>full[i]</code> → MMA → <code>empty[i].arrive</code>。</li>
+<li>稳态间隔 <code>max(T, (L+T)/S)</code>，最小 stage 数 <code>ceil(L/T) + 1</code>。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：新 barrier 的奇偶 · arrive 到了但字节没到不算完成 · 先登记字节再 arrive · arrive 过量报错 · increment 序列（含 S = 1）· advance 等于重复 increment · <strong>PipelineState 的 4 条序列和 7 个 advance 与真实 CUTLASS 相同</strong> · S = 4、K = 8 的完整时间线 · S = 1..6 的稳态间隔等于公式 · <code>min_stages</code> 恰好藏住延迟、多了没用 · 短循环没有稳态 · 四种 bug 分别死锁或数据竞争。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>mbarrier</strong>（memory barrier）：放在 shared memory 里的 64 位异步屏障。它有一个 phase（阶段）计数：每当预期的 arrive 次数和预期的字节都到齐，当前 phase 完成，进入下一个。</li>
+<li><strong>parity</strong>（奇偶）：等待时只告诉它“我等的是第奇数个还是第偶数个 phase”，而不是完整编号。只用 1 位，所以 S 个 stage 轮转时必须自己记住 phase 位。</li>
+<li><strong>transaction 字节</strong>（tx）：TMA 落地时，硬件直接在 mbarrier 上扣掉对应字节数（<code>complete_tx</code>），不需要任何线程 arrive。</li>
+<li><strong>full / empty barrier</strong>：每个 stage 两个 mbarrier。full：数据到了；empty：消费者用完了，可以覆盖。</li>
+<li><strong>WG</strong>（warp group，4 个 warp = 128 线程）：Hopper 上 WGMMA 的执行单位。主循环的消费者是一个或两个 WG（D3）。</li>
+</ul>
+</div>
+<h2 id="d2-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 回转寿司的 S 个盘子</div><p>厨师（生产者）和食客（消费者）之间只有 S 个盘子在转。每个盘子上有两盏灯：绿灯（full）亮表示“菜做好了”，红灯（empty）亮表示“吃完了，可以再装”。灯只显示“这是第奇数轮还是偶数轮”，所以厨师和食客各自记一个“我现在等第几号盘子的第几轮”（PipelineState）。厨师一开始等的是“上一轮的红灯”，新盘子默认已经是空的，所以直接通过（phase 1 起步）。厨师记错了轮次，就会等一盏永远不会再亮的灯（死锁）；食客记错了，就会把空盘子当成菜（数据竞争）；食客吃完不按红灯，厨师转完一圈就再也拿不到盘子（饿死）；厨师不看红灯直接装菜，就会把还没吃完的菜倒掉（覆盖）。</p>
+</div>
+<h2 id="d2-3">图解：一个 stage 的生命周期</h2>
+
+<figure class="flow"><div class="flow-head">stage i 的两盏灯<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;stage i 的两盏灯&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;acq&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;producer_acquire&quot;, &quot;s&quot;: &quot;wait empty[i] (phase p)&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tx&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;arrive_and_expect_tx&quot;, &quot;s&quot;: &quot;full[i]: tx += bytes&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;land&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA 落地&quot;, &quot;s&quot;: &quot;complete_tx → 完成&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;wait&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer_wait&quot;, &quot;s&quot;: &quot;wait full[i] (phase c)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mma&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;MMA&quot;, &quot;s&quot;: &quot;T 个时间单位&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rel&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer_release&quot;, &quot;s&quot;: &quot;empty[i].arrive&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;acq&quot;, &quot;b&quot;: &quot;tx&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tx&quot;, &quot;b&quot;: &quot;land&quot;, &quot;t&quot;: &quot;L&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: true, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;land&quot;, &quot;b&quot;: &quot;wait&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;wait&quot;, &quot;b&quot;: &quot;mma&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mma&quot;, &quot;b&quot;: &quot;rel&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;rel&quot;, &quot;b&quot;: &quot;acq&quot;, &quot;t&quot;: &quot;下一轮&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 230.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 190.0}}"></div><figcaption>一个 stage 从发出 TMA 到可以再用，至少要 L + T。S 个 stage 轮转，所以每 (L + T) / S 才能开始一块新的；同时 MMA 本身每块要 T。两者取大就是稳态间隔。</figcaption></figure>
+<h2 id="d2-4">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ S = 4，L = 700，T = 200，K = 8：四个 stage 藏不住 700 的延迟</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;fill&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;填满&quot;, &quot;s&quot;: &quot;t=0 发 4 块&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;go&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;开算&quot;, &quot;s&quot;: &quot;t=700..1500&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;stuck&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;卡住&quot;, &quot;s&quot;: &quot;t=900 才放出 stage 0&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;稳态&quot;, &quot;s&quot;: &quot;225 / 块&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;fill&quot;, &quot;b&quot;: &quot;go&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;go&quot;, &quot;b&quot;: &quot;stuck&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;stuck&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="fill"><div class="step-title">1. t = 0：生产者一口气发 4 块</div><p>生产者起点 <code>(0, 1, 0)</code>：在新的 empty barrier 上 <code>try_wait(1)</code> 立即为真。四个 stage 都通过，<code>load_issue = [0, 0, 0, 0, …]</code>。第 5 块要等 stage 0 的第 1 轮（<code>producer_start_state(4)</code> 增加 4 次后是 <code>(0, 0, 4)</code>）。</p>
+</div><div class="step" data-hl="fill,go"><div class="step-title">2. t = 700：数据落地，消费者开算</div><p>四块同时在 700 落地。消费者按 0、1、2、3 依次计算：<code>mma_start = [700, 900, 1100, 1300]</code>。</p>
+</div><div class="step" data-hl="go,stuck"><div class="step-title">3. t = 900：stage 0 释放，第 5 块才发出</div><p>第 0 块在 900 算完并 release，生产者马上发第 5 块，700 之后（1600）才落地。消费者在 1500 算完第 3 块后空等 100。<code>load_issue[4:] = [900, 1100, 1300, 1500]</code>，<code>load_done[4:] = [1600, 1800, 2000, 2200]</code>。</p>
+</div><div class="step" data-hl="stuck,st"><div class="step-title">4. 稳态</div><p><code>total = 2400</code>，最后 4 块的平均间隔 <code>225 = (700 + 200) / 4 &gt; 200</code>。S = 1..6 的稳态间隔是 900、450、300、225、200、200：要完全藏住延迟需要 <code>min_stages(700, 200) = ceil(3.5) + 1 = 5</code> 个 stage。</p>
+</div></div></div>
+<h2 id="d2-5">易错点</h2>
+<ul>
+<li><strong>生产者从 phase 0 起步。</strong> 新 barrier 的 phase 0 还没完成，生产者等 <code>empty[0]</code> 的 phase 0，消费者等 <code>full[0]</code>，谁也不动：t = 0 死锁（<code>producer waits empty[0] parity 0; consumer waits full[0] parity 0</code>）。测试 <code>test_bug_producer_phase0_deadlocks</code>。</li>
+<li><strong>消费者从 phase 1 起步。</strong> 新 barrier 上 <code>try_wait(1)</code> 立即为真，消费者读到还没写的 stage：<code>consumer reads stage 0 for tile 0 but it holds None</code>。测试 <code>test_bug_consumer_phase1_reads_dirty_data</code>。</li>
+<li><strong>忘了 release。</strong> 前 S 块正常，第 S+1 块的生产者永远等不到 empty：t = 1500 死锁。K ≤ S 时这个 bug 不会暴露（<code>total = 1500</code>），所以小测试抓不到它。测试 <code>test_bug_no_release_deadlocks_after_filling_the_ring</code>。</li>
+<li><strong>跳过 acquire。</strong> S = 2 时第 3 块直接覆盖 stage 0：<code>TMA for tile 2 overwrites stage 0 still holding tile 0</code>。测试 <code>test_bug_skip_acquire_overwrites_a_busy_stage</code>。</li>
+<li><strong>先 arrive 再 expect_tx。</strong> arrive 的那一刻 tx 还是 0，phase 立刻完成，消费者会提前读。<code>arrive_and_expect_tx</code> 必须先加字节再 arrive。测试 <code>test_expect_tx_before_arrive</code>。</li>
+<li><strong>S = 1 时 index 不动。</strong> CUTLASS 对 <code>Stages == 1</code> 单独处理：每次 ++ 都翻转 phase。测试 <code>test_single_stage_flips_every_step</code> 和真实 CUTLASS 的 <code>consumer_1</code> 序列。</li>
+</ul>
+<h2 id="d2-6">对照文档</h2>
+<blockquote>
+<p>“多 stage pipeline 会用多个 shared-memory buffer：计算当前 stage 时，producer 预取后续 stage；consumer 在确认数据 ready 后再消费；stage 被用完后才能释放并复用……同步协议保证不会读到未完成的数据，也不会覆盖仍在使用的 buffer。”</p>
+</blockquote>
+<p>文档里的 <code>issue_load / wait_until_ready / release_stage</code> 三个伪代码调用，在 CUTLASS 里分别是 <code>producer_acquire</code>（加上 TMA 发射）、<code>consumer_wait</code>、<code>consumer_release</code>。本题补上了文档没有展开的部分：ready / empty 用什么表示（mbarrier 的 phase 奇偶），以及“保证不会读到 / 不会覆盖”在协议写错时具体怎样失效。</p>
+<h2 id="d2-7">真实代码</h2>
+<p>生产者和消费者的四个调用（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L289">PipelineTmaAsync</a>）：</p>
+<pre><code class="language-cpp">void producer_acquire(uint32_t stage, uint32_t phase) {
+  empty_barrier_ptr_[stage].wait(phase);
+  if (params_.is_leader)
+    full_barrier_ptr_[stage].arrive_and_expect_tx(params_.transaction_bytes);
+}
+void producer_commit(uint32_t stage, uint32_t bytes) { }   // NOP for TMA：硬件自己 complete_tx
+void consumer_wait(uint32_t stage, uint32_t phase) { full_barrier_ptr_[stage].wait(phase); }
+void consumer_release(uint32_t stage) { empty_barrier_ptr_[stage].arrive(dst_blockid_, is_signaling_thread); }
+</code></pre>
+<p><code>wait</code> 就是一个 <code>try_wait.parity</code> 的自旋循环（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L344">ClusterBarrier::wait</a>）：</p>
+<pre><code class="language-text">LAB_WAIT:
+  mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1, %2;
+  @P1 bra DONE;
+  bra     LAB_WAIT;
+</code></pre>
+<p>生产者的起点（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L272">make_producer_start_state</a>）：</p>
+<pre><code class="language-cpp">// Producer starts with an opposite phase as the buffers are initially empty
+return {/*index*/ 0, /*phase*/ 1, /*count*/ 0};
+</code></pre>
+<h2 id="d2-8">上机验证</h2>
+<pre><code class="language-bash">playground/run.sh playground/d2_mbarrier_pipeline.cpp   # 真实 cutlass::PipelineState，在主机上编译
+./check.sh oracle d2                                    # 重新生成 tests/golden/d2_mbarrier_pipeline.json
+</code></pre>
+<p>本机的真实输出（节选）：</p>
+<pre><code class="language-text">  k | producer (index,phase) | consumer (index,phase)
+  0 |        (0,1)           |        (0,0)
+  3 |        (3,1)           |        (3,0)
+  4 |        (0,0)           |        (0,1)
+  8 |        (0,1)           |        (0,0)
+PipelineState&lt;4&gt;(2,1,0).advance(13) = (3,0,13)
+</code></pre>
+<p>生产者和消费者在同一个 index 上的 phase 永远相反：生产者等“上一轮被吃完”，消费者等“这一轮被装好”。<code>PipelineState</code> 只是整数记账，所以 oracle 只需把头文件引用的 <code>threadIdx</code>、<code>__syncthreads</code> 在主机上补一个空定义就能编译。mbarrier 本身是 PTX 指令，CPU 上跑不了，本题按 PTX ISA 的语义建模；真正的时序要在 Hopper 或更新的 GPU 上测（本机没有，未核对）。</p>
+<h2 id="d2-9">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">b = MBarrier(1); b.try_wait(1), b.try_wait(0)         # (True, False)
+b.arrive_and_expect_tx(1024); b.try_wait(0)           # False：字节还没到
+b.complete_tx(1024); b.try_wait(0), b.completed       # (True, 1)
+s = producer_start_state(4)
+seq = []
+for _ in range(6):
+    seq.append(s.as_tuple()); s.increment()
+seq        # [(0,1,0), (1,1,1), (2,1,2), (3,1,3), (0,0,4), (1,0,5)]
+PipelineState(4, 2, 1).advance(13).as_tuple()          # (3, 0, 13)
+r = simulate(4, 8, 700.0, 200.0)
+r.mma_start, r.total, r.steady_interval                # [700, 900, 1100, 1300, 1600, 1800, 2000, 2200], 2400, 225
+min_stages(700, 200)                                   # 5
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>为什么 parity 只要 1 位就够？什么情况下 1 位会不够（提示：生产者领先消费者超过一整圈）？</li>
+<li>生产者为什么从 phase 1 起步，而不是先把 empty barrier 都 arrive 一遍？</li>
+<li>推导 <code>min_stages = ceil(L/T) + 1</code>：为什么是 +1 而不是 <code>ceil(L/T)</code>？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>MBarrier</code>：三个整数 <code>pending</code>、<code>tx</code>、<code>completed</code>；每次 arrive 或 complete_tx 后检查“两者都为 0”就完成一个 phase，并把 <code>pending</code> 重置。</li>
+<li><code>PipelineState.advance(n)</code>：<code>wraps = (index + n) // S</code>，奇数次就翻转 phase，然后 <code>index = (index + n) % S</code>。</li>
+<li><code>simulate</code>：把生产者和消费者写成生成器，<code>yield (&quot;wait&quot;, 条件, 说明)</code> 或 <code>yield (&quot;sleep&quot;, 时长, None)</code>。主循环：同一时刻反复推进所有能推进的参与者（生产者在前）；都推进不了时，若没有待发生事件就是死锁，否则把时间推进到下一个事件并执行它（TMA 落地、MMA 结束）。</li>
+<li>生产者每块：等 empty（除非 <code>skip_acquire</code>）→ 检查 stage 是否仍被占用（是就 RaceError）→ <code>arrive_and_expect_tx</code> → 安排 L 之后的落地事件（写 stage 内容并 <code>complete_tx</code>）→ increment。</li>
+<li>消费者每块：等 full → 检查 stage 里是不是第 k 块（不是就 RaceError）→ sleep T → release（除非 <code>no_release</code>）→ increment。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>协议保证同一个 stage 上生产者最多领先消费者一轮：生产者要 acquire 第 r+1 轮，必须先等消费者 release 第 r 轮。所以等待方看到的 phase 只可能是“当前”或“上一个”，1 位足以区分。如果绕过 acquire（<code>skip_acquire</code>），领先就可能超过一轮，奇偶就会混淆。</li>
+<li>两种写法等价，但 phase 1 起步不需要任何线程在初始化后再做一次 arrive，也就不需要额外的同步：新 barrier 的“上一个 phase”天然算完成。CUTLASS 的注释原话是 “Producer starts with an opposite phase as the buffers are initially empty”。</li>
+<li>一个 stage 的周期是 L + T（落地 L，再被算 T 才释放），S 个 stage 轮转，稳态间隔 <code>(L + T) / S</code>。要它 ≤ T，需要 <code>S ≥ L/T + 1</code>，取整得 <code>ceil(L/T) + 1</code>。多出来的那 1 个是“正在被 MMA 占用”的 stage：它在算的时候不能同时在搬。</li>
+</ol>
+</div></details></div></details>
+<h2 id="d2-10">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/d2_mbarrier_pipeline.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d2_mbarrier_pipeline.py</span><span class="muted small">253 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D2 · mbarrier 多级流水线：phase 奇偶、expect_tx、PipelineState，以及会死锁 / 会读脏数据的写法 — reference solution.
+
+Hopper 的 GEMM 主循环用 S 个 shared-memory stage 做“边搬边算”：生产者（发 TMA 的线程）往 stage i 搬第 k 块，
+消费者（做 MMA 的 warp group）算完第 k−S 块后把 stage 让出来。同步靠每个 stage 的两个 mbarrier：
+full[i]（数据到了）和 empty[i]（可以覆盖了）。CUTLASS 把协议封装在 include/cutlass/pipeline/sm90_pipeline.hpp
+的 PipelineTmaAsync 和 PipelineState 里；本题复刻它们，并用离散事件模拟主循环的时间和错误。
+
+mbarrier 模型（PTX ISA 的 mbarrier 语义，简化到本题需要的部分）
+- init(arrive_count)：每个 phase 需要 arrive_count 次 arrive。phase 编号从 0 开始。
+- arrive(n=1)：待到达数减 n；减到负数抛 ProtocolError。
+- expect_tx(b)：待完成的 transaction 字节 += b；complete_tx(b)：-= b（TMA 数据落地时由硬件做）。
+- 当“待到达数 == 0 且 tx == 0”时当前 phase 完成：完成计数 +1，待到达数重置为 arrive_count。
+- try_wait(parity)：parity 指定的那个 phase 已经完成时返回 True。规则：当前（未完成）phase的奇偶
+  是 completed % 2，所以 try_wait(parity) == (completed % 2 != parity)。新建的 barrier 上 try_wait(1) 立即为 True。
+
+PipelineState（逐行对照 CUTLASS）
+- 字段 index、phase、count；++：index+1、count+1，index 到 S 时回 0 并翻转 phase（S == 1时每次都翻转 phase）。
+- advance(n) 与 n 次 ++ 等价（CUTLASS 用整除算翻转次数的奇偶）。
+- 消费者起点 (0, 0, 0)；生产者起点 make_producer_start_state() = (0, 1, 0)：buffer 一开始是空的，
+  所以生产者等 empty 的“上一个 phase”，在新 barrier 上立即通过。
+
+协议（PipelineTmaAsync）
+- producer_acquire(st)：等 empty[st.index].try_wait(st.phase)，然后 full[st.index].arrive_and_expect_tx(tx_bytes)。
+- TMA 发出后经过 load_latency，硬件在 full[st.index] 上 complete_tx(tx_bytes)。
+- consumer_wait(st)：等 full[st.index].try_wait(st.phase)；consumer_release(st)：empty[st.index].arrive()。
+
+simulate(stages, k_tiles, load_latency, mma_time, tx_bytes=1024, bug=None)
+- 生产者：每块 k：acquire → arrive_and_expect_tx → 在当前时刻发 TMA（发射不耗时）→ ++state。
+- 消费者：每块 k：wait → 检查 stage 里确实是第 k 块 → 计算 mma_time → release → ++state。
+- 同一时刻生产者先于消费者执行；时间只在“等不到”时推进到下一个事件。
+- bug：None | &quot;producer_phase0&quot;（生产者起点 phase 用 0）| &quot;consumer_phase1&quot;（消费者起点phase 用 1）
+       | &quot;no_release&quot;（消费者从不 release）| &quot;skip_acquire&quot;（生产者不等 empty）。
+- 检测：没有可运行的参与者、也没有待发生的事件但还没跑完 → DeadlockError；
+  消费者读到的 stage 不是第 k 块 → RaceError；生产者往一个还没被 release 的 stage 发 TMA →RaceError。
+- 返回 SimResult：total（最后一块算完的时刻）、load_issue / load_done / mma_start / mma_end（每块一个时间）、
+  steady_interval（最后 S 块的平均间隔 (mma_end[-1] − mma_end[-1−S]) / S；k_tiles &lt;= S时为 None）。
+
+公式
+    predicted_interval(S, L, T) = max(T, (L + T) / S)     一个 stage 的周期是 L + T，S 个 stage 轮转
+    min_stages(L, T)            = ceil(L / T) + 1         让 (L + T) / S &lt;= T 的最小S
+
+API
+    ProtocolError, DeadlockError, RaceError, SimResult           given
+    MBarrier(arrive_count): arrive / expect_tx / arrive_and_expect_tx / complete_tx/ try_wait / completed
+    PipelineState(stages, index=0, phase=0, count=0): increment() / advance(n) / as_tuple()
+    producer_start_state(stages) -&gt; PipelineState
+    simulate(...) -&gt; SimResult
+    predicted_interval(stages, load_latency, mma_time) -&gt; float
+    min_stages(load_latency, mma_time) -&gt; int
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import heapq
+import math
+from dataclasses import dataclass, field
+
+
+class ProtocolError(RuntimeError):
+    &quot;&quot;&quot;mbarrier 被错误使用（例如 arrive 次数超过预期）。&quot;&quot;&quot;
+
+
+class DeadlockError(RuntimeError):
+    &quot;&quot;&quot;所有参与者都在等，且不会再有事件发生。&quot;&quot;&quot;
+
+
+class RaceError(RuntimeError):
+    &quot;&quot;&quot;读到还没落地的数据，或覆盖了还没被消费的 stage。&quot;&quot;&quot;
+
+
+@dataclass
+class SimResult:
+    total: float
+    load_issue: list = field(default_factory=list)
+    load_done: list = field(default_factory=list)
+    mma_start: list = field(default_factory=list)
+    mma_end: list = field(default_factory=list)
+    steady_interval: float | None = None
+
+
+class MBarrier:
+    def __init__(self, arrive_count: int):
+        self.arrive_count = arrive_count
+        self.pending = arrive_count
+        self.tx = 0
+        self.completed = 0
+
+    def _maybe_complete(self) -&gt; None:
+        # phase 完成需要两件事同时满足：所有预期的 arrive 都到了，且所有预期的字节都到了。
+        if self.pending == 0 and self.tx == 0:
+            self.completed += 1
+            self.pending = self.arrive_count
+
+    def arrive(self, n: int = 1) -&gt; None:
+        if n &gt; self.pending:
+            raise ProtocolError(f&quot;arrive({n}) but only {self.pending} arrivals pending&quot;)
+        self.pending -= n
+        self._maybe_complete()
+
+    def expect_tx(self, nbytes: int) -&gt; None:
+        self.tx += nbytes
+
+    def arrive_and_expect_tx(self, nbytes: int) -&gt; None:
+        # 先登记字节、再 arrive：否则 arrive 那一刻 tx 还是 0，phase 会提前完成。
+        self.expect_tx(nbytes)
+        self.arrive()
+
+    def complete_tx(self, nbytes: int) -&gt; None:
+        self.tx -= nbytes
+        self._maybe_complete()
+
+    def try_wait(self, parity: int) -&gt; bool:
+        return (self.completed &amp; 1) != parity
+
+
+class PipelineState:
+    def __init__(self, stages: int, index: int = 0, phase: int = 0, count: int =0):
+        self.stages, self.index, self.phase, self.count = stages, index, phase, count
+
+    def increment(self) -&gt; None:
+        if self.stages == 1:
+            self.phase ^= 1
+            self.count += 1
+            return
+        self.index += 1
+        self.count += 1
+        if self.index == self.stages:
+            self.index = 0
+            self.phase ^= 1
+
+    def advance(self, n: int) -&gt; &quot;PipelineState&quot;:
+        # 与 CUTLASS 的 advance 相同：跨过 stage 边界的次数为奇数时翻转 phase。
+        wraps = (self.index + n) // self.stages
+        if wraps % 2 == 1:
+            self.phase ^= 1
+        self.index = (self.index + n) % self.stages
+        self.count += n
+        return self
+
+    def as_tuple(self) -&gt; tuple:
+        return (self.index, self.phase, self.count)
+
+
+def producer_start_state(stages: int) -&gt; PipelineState:
+    return PipelineState(stages, 0, 1, 0)
+
+
+def simulate(stages: int, k_tiles: int, load_latency: float, mma_time: float,
+             tx_bytes: int = 1024, bug: str | None = None) -&gt; SimResult:
+    full = [MBarrier(1) for _ in range(stages)]
+    empty = [MBarrier(1) for _ in range(stages)]
+    stage_data = [None] * stages        # 哪一块已经落地在这个 stage
+    stage_busy = [None] * stages        # 哪一块占着这个 stage、还没被 release
+    res = SimResult(total=0.0, load_issue=[None] * k_tiles, load_done=[None] * k_tiles,
+                    mma_start=[None] * k_tiles, mma_end=[None] * k_tiles)
+    events: list = []                   # (time, seq, callback)
+    seq = [0]
+    now = [0.0]
+
+    def schedule(t, fn):
+        heapq.heappush(events, (t, seq[0], fn))
+        seq[0] += 1
+
+    def producer():
+        st = PipelineState(stages, 0, 0 if bug == &quot;producer_phase0&quot; else 1, 0)
+        for k in range(k_tiles):
+            i, p = st.index, st.phase
+            if bug != &quot;skip_acquire&quot;:
+                yield (&quot;wait&quot;, lambda i=i, p=p: empty[i].try_wait(p), f&quot;producer waits empty[{i}] parity {p}&quot;)
+            if stage_busy[i] is not None:
+                raise RaceError(f&quot;TMA for tile {k} overwrites stage {i} still holding tile {stage_busy[i]}&quot;)
+            full[i].arrive_and_expect_tx(tx_bytes)
+            stage_busy[i] = k
+            res.load_issue[k] = now[0]
+            def land(i=i, k=k):
+                stage_data[i] = k
+                res.load_done[k] = now[0]
+                full[i].complete_tx(tx_bytes)
+
+            schedule(now[0] + load_latency, land)
+            st.increment()
+
+    def consumer():
+        st = PipelineState(stages, 0, 1 if bug == &quot;consumer_phase1&quot; else 0, 0)
+        for k in range(k_tiles):
+            i, p = st.index, st.phase
+            yield (&quot;wait&quot;, lambda i=i, p=p: full[i].try_wait(p), f&quot;consumer waits full[{i}] parity {p}&quot;)
+            if stage_data[i] != k:
+                raise RaceError(f&quot;consumer reads stage {i} for tile {k} but it holds {stage_data[i]}&quot;)
+            res.mma_start[k] = now[0]
+            yield (&quot;sleep&quot;, mma_time, None)
+            res.mma_end[k] = now[0]
+            if bug != &quot;no_release&quot;:
+                stage_busy[i] = None
+                empty[i].arrive()
+            st.increment()
+
+    # 每个参与者：生成器、当前在等的东西
+    actors = [{&quot;name&quot;: &quot;producer&quot;, &quot;gen&quot;: producer(), &quot;cmd&quot;: None, &quot;done&quot;: False},
+              {&quot;name&quot;: &quot;consumer&quot;, &quot;gen&quot;: consumer(), &quot;cmd&quot;: None, &quot;done&quot;: False}]
+
+    def step(a) -&gt; bool:
+        &quot;&quot;&quot;尽可能推进一个参与者；有进展返回 True。&quot;&quot;&quot;
+        progressed = False
+        while not a[&quot;done&quot;]:
+            cmd = a[&quot;cmd&quot;]
+            if cmd is not None:
+                kind, arg, _ = cmd
+                if kind == &quot;wait&quot; and not arg():
+                    return progressed
+                if kind == &quot;sleep&quot;:
+                    return progressed          # 由事件唤醒
+            try:
+                nxt = next(a[&quot;gen&quot;])
+            except StopIteration:
+                a[&quot;done&quot;] = True
+                return True
+            progressed = True
+            a[&quot;cmd&quot;] = nxt
+            if nxt[0] == &quot;sleep&quot;:
+                def wake(a=a):
+                    a[&quot;cmd&quot;] = None
+                schedule(now[0] + nxt[1], wake)
+                return progressed
+            if nxt[0] == &quot;wait&quot; and nxt[1]():
+                a[&quot;cmd&quot;] = None
+        return progressed
+
+    while True:
+        # 同一时刻反复推进，直到谁都动不了（生产者排在前面）
+        while any(step(a) for a in actors):
+            pass
+        if all(a[&quot;done&quot;] for a in actors):
+            break
+        if not events:
+            waits = &quot;; &quot;.join(a[&quot;cmd&quot;][2] for a in actors if not a[&quot;done&quot;] and a[&quot;cmd&quot;] and a[&quot;cmd&quot;][2])
+            raise DeadlockError(f&quot;deadlock at t={now[0]}: {waits}&quot;)
+        t = events[0][0]
+        now[0] = t
+        while events and events[0][0] == t:
+            _, _, fn = heapq.heappop(events)
+            fn()
+    res.total = res.mma_end[-1] if k_tiles else 0.0
+    if k_tiles &gt; stages:
+        res.steady_interval = (res.mma_end[-1] - res.mma_end[-1 - stages]) / stages
+    return res
+
+
+def predicted_interval(stages: int, load_latency: float, mma_time: float) -&gt; float:
+    return max(mma_time, (load_latency + mma_time) / stages)
+
+
+def min_stages(load_latency: float, mma_time: float) -&gt; int:
+    return math.ceil(load_latency / mma_time) + 1</code></pre></div></div></details>
+<h2 id="d2-11">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>cluster 里 multicast 时，一个 stage 的 empty barrier 要等几个 consumer arrive？对照 <code>PipelineTmaAsync</code> 构造函数里的 <code>multicast_consumer_arrival_count</code> 和 <code>dst_blockid_</code>。</li>
+<li>消费者的 <code>consumer_release</code> 放在 MMA 发射之后还是 MMA 完成之后？WGMMA 是异步的：CUTLASS 主循环为什么把 release 推迟一拍，配合 <code>warpgroup_wait&lt;K&gt;</code>？对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L417">collective mma</a> 循环。</li>
+<li>SMEM 一共 228 KB，一个 128×128×64 的 bf16 stage 要多大？最多能放几个 stage，还剩多少给 epilogue？</li>
+<li>如果 L 不是常数，而是在 500 到 900 之间抖动，<code>min_stages</code> 该按什么取？</li>
+</ul>
+
+<nav class="pager"><a href="d1_tma_box.html">← 上一题 D1</a><a href="d3_warp_specialization.html">D3 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#d2-1">题面速览</a>
+<a class="o2" href="#d2-2">直觉与类比</a>
+<a class="o2" href="#d2-3">图解：一个 stage 的生命周期</a>
+<a class="o2" href="#d2-4">逐步演示</a>
+<a class="o2" href="#d2-5">易错点</a>
+<a class="o2" href="#d2-6">对照文档</a>
+<a class="o2" href="#d2-7">真实代码</a>
+<a class="o2" href="#d2-8">上机验证</a>
+<a class="o2" href="#d2-9">三级提示</a>
+<a class="o2" href="#d2-10">参考解</a>
+<a class="o2" href="#d2-11">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

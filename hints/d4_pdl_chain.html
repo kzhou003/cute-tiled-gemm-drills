@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D4 · PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3 cur" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<main>
+<header class="cover"><div class="kicker">D4 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 55 分钟 · 中</div><h1>D4 · PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</h1><p class="lede">两个串联的 GEMM（H = X·W1，Y = H·W2）之间有一段只因为“前一个 kernel 还没结束”而空着的时间。PDL 让第二个 kernel 提前启动、先做和 H 无关的事，读 H 之前再等。本题把这条时间线算出来，并写一个检查器：trigger 放哪只影响快慢，wait 放哪决定对错。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d4_pdl_chain.py"><code>mine/d4_pdl_chain.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d4_pdl_chain.py"><code>tests/test_d4_pdl_chain.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d4_pdl_chain.py"><code>solutions/d4_pdl_chain.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D4"> 我已完成这道题</label></header>
+<h2 id="d4-1">题面速览</h2>
+<ul>
+<li><strong>背景知识</strong>：先读 <a href="../knowledge/time_dimension.html">时间维度</a> 里的 PDL 一节。</li>
+<li><strong>在体系里的位置</strong>：CUTLASS 把 PDL 的两条 device 端指令包成 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L87">launch_dependent_grids</a> / <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L97">wait_on_dependent_grids</a>。Hopper 的 warp-specialized kernel 在 producer warp 发第一个 TMA 之前调用 wait（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L605">cooperative kernel 的 mainloop producer</a>），在最后一个 tile 算完之后调用 launch（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L830">同一文件</a>）。主机端用 <code>cudaLaunchAttributeProgrammaticStreamSerialization</code> 发射（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/dependent_kernel_launch.md">dependent_kernel_launch.md</a>）。</li>
+<li><strong>你要实现</strong>：<code>kernel_time</code>、<code>trigger_time</code>、<code>timeline</code>、<code>best_trigger</code>、<code>check</code>、<code>independent_operands</code>、<code>latest_wait</code>、<code>speedup</code>。<code>Phase</code>、<code>Kernel</code>、四个时间常量和例子构造函数 <code>two_gemm_chain</code> 已经给出。</li>
+<li><strong>关键规则</strong>：
+<ol>
+<li>普通 stream / graph：后继 kernel 在前驱结束之后加一段固定空隙才开始；trigger 和 wait 都不起作用。</li>
+<li>PDL：后继在前驱的 trigger 之后 <code>PDL_LAUNCH_US</code> 开始；前驱没有 trigger 时退化成普通串行。</li>
+<li><code>griddepcontrol.wait</code> 返回的时刻是<strong>前驱完全结束 + FLUSH_US</strong>，而不是前驱 trigger 的时刻。</li>
+<li>正确性只看 wait：wait 之前不能读前驱写的 buffer，也不能写前驱读写的 buffer。trigger 放哪都不改变 <code>check</code> 的结果。</li>
+<li>提前启动的后继会和前驱抢 SM：<code>contention</code> 让前驱的结束时间按重叠时长变长，所以 trigger 不是越早越好。</li>
+</ol>
+</li>
+</ul>
+<p><strong>验收要点</strong>：kernel 与 trigger 时长 · stream / graph 的空隙 · stream 忽略 trigger 和 wait · PDL 的起点 22.5 与 wait 不卡（总时间 47.5）· wait 放在 W2 预取之前会卡到 26.5（49.5）· wait 等前驱结束而不是 trigger · 没有 trigger 时退化 · wait 在所有 phase 之后 · contention 让最优 trigger 从 0 变成 1 · 没有 PDL 时 contention 不起作用 · read-before-wait · write-before-wait（WAR）· 三个 kernel 的链只检查相邻对 · trigger 位置不改变检查结果 · <code>independent_operands = ['W2']</code>、<code>latest_wait = 2</code> · speedup · 未知 mode 报错。</p>
+
+<div class="callout info"><div class="callout-title">第一次出现的术语</div><ul>
+<li><strong>PDL</strong>（Programmatic Dependent Launch）：Hopper（sm90）起的 CUDA 特性。同一个 stream 里的后继 kernel 可以在前驱结束前启动。</li>
+<li><strong>trigger</strong>：前驱调用 <code>griddepcontrol.launch_dependents</code>（CUDA runtime 里是 <code>cudaTriggerProgrammaticLaunchCompletion()</code>），表示“后继可以开始了”。它只是性能提示，不提供可见性。</li>
+<li><strong>wait</strong>：后继调用 <code>griddepcontrol.wait</code>（<code>cudaGridDependencySynchronize()</code>），阻塞到前驱全部结束、写回的内存对它可见。</li>
+<li><strong>独立 operand</strong>：后继读、但前驱不写的数据，例如第二个 GEMM 的权重 W2。它可以在 wait 之前加载。</li>
+<li><strong>WAR</strong>（write-after-read）：后继写了前驱还要读的 buffer。前驱还在跑，提前写会破坏它的输入。</li>
+</ul>
+</div>
+<h2 id="d4-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 接力赛的交接区</div><p>第一棒（gemm1）跑到交接区入口时喊一声“我到了”（trigger），第二棒（gemm2）听到就开始起跑加速（setup、预取 W2）。但接力棒（H）必须真正交到手上才能继续跑（wait）：起跑早不等于可以不接棒就跑。喊得太早，第二棒会在跑道上挡住第一棒（contention）；喊得太晚，交接区里就是空等。没有 PDL 的普通 stream 相当于第二棒站在原地，等第一棒完全停下来、再等裁判吹哨（3 µs 的 launch 空隙）才起跑。</p>
+</div>
+<h2 id="d4-3">PDL 的价值在哪一层体现</h2>
+<p>单独测一个 GEMM，PDL 几乎看不出收益：它节省的是<strong>两个 kernel 之间</strong>的空隙（launch 延迟、prologue、和前驱无关的预取），只有在一串依赖的 kernel 里才有意义。所以它真正发挥作用的地方在系统层：</p>
+<ul>
+<li><strong>CUDA Graph / stream 里的一串小 kernel</strong>：LLM decode 阶段每层是一串小 GEMM 和逐元素 kernel，每个只跑几微秒，launch 和 setup 的固定开销占比很高。graph 只能把空隙从 ~3 µs 压到 ~1 µs，PDL 能把下一个 kernel 的 setup 和权重预取藏进上一个的尾巴里。</li>
+<li><strong>编译器 / 框架负责插 trigger 和 wait</strong>：哪个 kernel 读哪个 buffer、wait 最晚能放到哪里（本题的 <code>latest_wait</code>）、trigger 该放多早（<code>best_trigger</code>）都是<strong>跨 kernel</strong> 的信息，单个 kernel 的作者看不全。CUTLASS 把指令包好，但“这一对 kernel 之间能不能用、用在哪”通常由图级调度（CUDA Graph 的 programmatic edge、推理框架的 kernel 编排）决定。</li>
+<li><strong>autotune 要按端到端时间做</strong>：CUTLASS example 63 的 README 也提醒，大部分收益要在端到端应用里看，<code>overlap_ratio</code> 和 <code>prefetch_ratio</code> 应该按整条链的时间调。本题的 <code>best_trigger</code> 是这个搜索的最小模型。</li>
+</ul>
+<h2 id="d4-4">图解：四种 mode 的时间关系</h2>
+
+<figure class="flow"><div class="flow-head">gemm1 → gemm2 的起点与等待<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;gemm1 → gemm2 的起点与等待&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;g1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;gemm1&quot;, &quot;s&quot;: &quot;2 + 20 + 4 = 26 µs&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;trg&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;trigger&quot;, &quot;s&quot;: &quot;mainloop 之后：22 µs&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;end&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;前驱结束&quot;, &quot;s&quot;: &quot;26 µs（+0.5 flush）&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;gemm2 启动&quot;, &quot;s&quot;: &quot;PDL：22 + 0.5&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;wait 返回&quot;, &quot;s&quot;: &quot;max(t, 26.5)&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ml&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;读 H 的 mainloop&quot;, &quot;s&quot;: &quot;wait 之后&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;g1&quot;, &quot;b&quot;: &quot;trg&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;g1&quot;, &quot;b&quot;: &quot;end&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;trg&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;end&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;st&quot;, &quot;b&quot;: &quot;ml&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;ml&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 176.0}}"></div><figcaption>起点只由 trigger 决定，wait 只由前驱结束决定。正确性来自下面那条线；trigger 那条线只决定能藏住多少 setup 和预取。</figcaption></figure>
+<h2 id="d4-5">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 文档里的 H = X·W1 → Y = H·W2：从 stream 54 µs 到 PDL 44.5 µs</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;stream&quot;, &quot;s&quot;: &quot;54.0&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;g&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;graph&quot;, &quot;s&quot;: &quot;52.0&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;PDL&quot;, &quot;s&quot;: &quot;47.5&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;contention&quot;, &quot;s&quot;: &quot;最优 trigger 变化&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;wait 太早&quot;, &quot;s&quot;: &quot;49.5&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;k&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;check&quot;, &quot;s&quot;: &quot;read-before-wait&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;g&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;g&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;e&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}, {&quot;a&quot;: &quot;e&quot;, &quot;b&quot;: &quot;k&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 168.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="s"><div class="step-title">1. 普通 stream</div><p>gemm1 = 2 + 20 + 4 = 26 µs，gemm2 = 2 + 5 + 15 + 3 = 25 µs。stream 模式下 gemm2 从 26 + 3 = 29 开始，spans <code>[(0, 26), (29, 54)]</code>，总时间 54。</p>
+</div><div class="step" data-hl="s,g"><div class="step-title">2. CUDA graph</div><p>graph 节点之间的空隙是 1 µs：gemm2 从 27 开始，总时间 52。graph 只缩短 launch 空隙，不让两个 kernel 重叠。</p>
+</div><div class="step" data-hl="g,p"><div class="step-title">3. PDL：提前启动</div><p>gemm1 在 mainloop 之后 trigger（22 µs），gemm2 从 22 + 0.5 = 22.5 开始：setup 22.5–24.5，prefetch_w2 24.5–29.5。wait 放在 mainloop 之前，返回时刻是 <code>max(29.5, 26 + 0.5) = 29.5</code>，没有卡住。mainloop 29.5–44.5，epilogue 到 47.5。<code>speedup = 54 / 47.5 = 1.137</code>。</p>
+</div><div class="step" data-hl="p,e"><div class="step-title">4. wait 放得太早</div><p><code>two_gemm_chain(consumer_wait=&quot;prefetch_w2&quot;)</code>：wait 在 W2 预取之前，prefetch 只能从 26.5 开始，总时间 49.5。这个位置是正确的，但把能藏在 gemm1 后面的 5 µs 预取浪费了。<code>latest_wait</code> 返回 2（mainloop），这是正确位置里最晚、也最快的。</p>
+</div><div class="step" data-hl="p,c"><div class="step-title">5. contention 改变最优 trigger</div><p>没有 contention 时 <code>best_trigger = (0, 44.5)</code>：setup 之后就 trigger 最好。contention = 0.5 时，<code>trigger_after = 0</code> 让 gemm2 的 setup + prefetch（7 µs）和 gemm1 重叠，gemm1 被拉长到 <code>26 + 0.5·7 = 29.5</code>，总时间 48.0；<code>trigger_after = 1</code> 时 gemm2 从 22.5 开始，只和 gemm1 重叠 26 − 22.5 = 3.5 µs，gemm1 拉长到 27.75，wait 在 28.25 返回，仍早于 mainloop 的 29.5，总时间不变，最优变成 <code>(1, 47.5)</code>。这就是 CUTLASS 注释说的“太早会和当前 kernel 抢资源”。</p>
+</div><div class="step" data-hl="e,k"><div class="step-title">6. 正确性检查</div><p>去掉 wait（<code>consumer_wait=&quot;none&quot;</code>），<code>check</code> 返回 <code>[&quot;read-before-wait: gemm2.mainloop reads H&quot;]</code>。如果 gemm2 的 setup 写了 X（gemm1 还在读），返回 <code>[&quot;write-before-wait: gemm2.setup writes X&quot;]</code>。改 trigger 的位置，这两条结果都不会变。</p>
+</div></div></div>
+<h2 id="d4-6">易错点</h2>
+<ul>
+<li><strong>wait 等到前驱的 trigger 就返回。</strong> trigger 不提供可见性，wait 等的是前驱完全结束 + flush。测试 <code>test_wait_waits_for_end_not_trigger</code> 把 epilogue 拉长到 30 µs，mainloop 必须从 52.5 开始。</li>
+<li><strong>前驱没有 trigger 时后继在前驱开始时启动。</strong> 没有 trigger 等价于“kernel 结束时隐式触发”，PDL 退化成串行加空隙。测试 <code>test_no_trigger_falls_back_to_gap</code>。</li>
+<li><strong>stream 模式也用了 trigger。</strong> 只有 pdl / graph_pdl 读 trigger 和 wait。测试 <code>test_timeline_modes</code>。</li>
+<li><strong>contention 拉长了前驱的 trigger。</strong> 只拉长前驱的结束，trigger 时刻不变（后继已经启动了）。测试 <code>test_contention_only_stretches_the_producer_end</code> 检查 spans 是 <code>(0, 27.75)</code>。</li>
+<li><strong>只检查读。</strong> 后继在 wait 之前写前驱的输入（WAR）同样是竞争。测试 <code>test_write_hazard_before_wait</code>。</li>
+<li><strong>用 trigger 的位置推断正确性。</strong> 测试 <code>test_trigger_position_never_changes_correctness</code> 遍历所有组合。</li>
+</ul>
+<h2 id="d4-7">对照文档</h2>
+<blockquote>
+<p>“PDL 不等于 kernel 内 pipeline。它解决的是两个有依赖关系的 kernel 之间的启动时机：允许 consumer kernel 在 producer kernel 完全结束之前就开始执行一部分与 producer 输出无关的工作。……Consumer 只能在同步前访问明确独立于 producer 的数据。不能因为 kernel 已经提前启动，就提前读取 producer 尚未完成写入的输出。”</p>
+</blockquote>
+<p>文档里的“Producer 先完成必要写入 → 触发 programmatic completion → Consumer 先做不依赖 producer 的工作 → grid dependency synchronize → 再读取依赖 producer 的结果”五个框，在本题里分别是 <code>trigger_after</code>、<code>PDL_LAUNCH_US</code>、<code>prefetch_w2</code>、<code>wait_before</code>、<code>mainloop</code>。文档说“预取 W₂、准备地址”可以提前做，<code>independent_operands</code> 就是把这句话变成集合运算：consumer 的 reads 减去 producer 的 writes。</p>
+<h2 id="d4-8">真实代码</h2>
+<p>两条指令和它们的注释（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h">grid_dependency_control.h</a>）：</p>
+<pre><code class="language-cpp">// launch_dependents doesn't impact the functionality but the performance:
+// Launching a dependent kernel too early can compete with current kernels,
+// while launching too late can lead to a long latency.
+void launch_dependent_grids() { asm volatile(&quot;griddepcontrol.launch_dependents;&quot;); }
+// enforces no global memory access prior to this instruction.
+void wait_on_dependent_grids() { asm volatile(&quot;griddepcontrol.wait;&quot; ::: &quot;memory&quot;); }
+</code></pre>
+<p>example 63 的 producer（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/collective/sm90_mma_tma_gmma_ss_warpspecialized_with_prefetch.hpp#L423-L460">sm90_mma_tma_gmma_ss_warpspecialized_with_prefetch.hpp</a>）：加载激活（前驱的输出）的 warp 先 wait，加载权重的 warp 不等；trigger 在发出一定比例的 k-tile 之后：</p>
+<pre><code class="language-cpp">cutlass::arch::wait_on_dependent_grids();
+for (int cnt = 0; k_tile_count &gt; 0; --k_tile_count, ++cnt) {
+  pipeline.producer_acquire(smem_pipe_write);
+  copy(tma_load_a ...); copy(tma_load_b ...);
+  if (!disable_gdc &amp;&amp; cnt &gt;= launch_dep_grids_threshold &amp;&amp; !launch_dep_grids) {   // overlap_ratio 决定阈值
+    launch_dep_grids = true;
+    cutlass::arch::launch_dependent_grids();
+  }
+  ++smem_pipe_write;
+}
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>文档 / 本题</th>
+<th>CUTLASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trigger_after</code></td>
+<td><code>overlap_ratio</code> 决定的 <code>launch_dep_grids_threshold</code></td>
+</tr>
+<tr>
+<td><code>wait_before</code></td>
+<td>producer warp 里 <code>wait_on_dependent_grids()</code> 的位置</td>
+</tr>
+<tr>
+<td><code>independent_operands</code></td>
+<td>example 63 在 wait 之前预取的权重（<code>prefetch_ratio</code>）</td>
+</tr>
+<tr>
+<td><code>contention</code></td>
+<td>注释里的 “compete with current kernels”</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="d4-9">上机验证</h2>
+<p>本机没有 Hopper GPU，PDL 的真实效果没法在这里测。有 sm90（或更新）的机器时可以这样对照：</p>
+<pre><code class="language-bash"># CUTLASS example 63：overlap_ratio 就是本题的 trigger 位置，-1 表示关闭 PDL 重叠
+./63_hopper_gemm_with_weight_prefetch --m=8192 --n=1 --k=8192 --o=-1.0 --p=-1.0
+./63_hopper_gemm_with_weight_prefetch --m=8192 --n=1 --k=8192 --o=0.5 --p=-1.0
+./63_hopper_gemm_with_weight_prefetch --m=8192 --n=1 --k=8192 --o=0.8 --p=0.7
+# 用 Nsight Systems 看两个 kernel 是否重叠：
+nsys profile --cuda-graph-trace=node -o pdl ./your_two_gemm_app
+</code></pre>
+<p>RTX 5090（SM120）也支持 <code>griddepcontrol</code>，<a href="https://github.com/kzhou003/cuda-kernels-dev-drills">cuda-kernels-dev-drills</a> 里有在 5090 上真机测 PDL 的练习。</p>
+<h2 id="d4-10">三级提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">ks = two_gemm_chain()
+kernel_time(ks[0]), trigger_time(ks[0])          # (26.0, 22.0)
+timeline(ks, &quot;stream&quot;)[&quot;spans&quot;]                  # [(0.0, 26.0), (29.0, 54.0)]
+timeline(ks, &quot;pdl&quot;)[&quot;phases&quot;][1]
+# [('setup', 22.5, 24.5), ('prefetch_w2', 24.5, 29.5), ('mainloop', 29.5, 44.5), ('epilogue', 44.5, 47.5)]
+best_trigger(ks, &quot;pdl&quot;, 0.0), best_trigger(ks, &quot;pdl&quot;, 0.5)   # ((0, 44.5), (1, 47.5))
+check(two_gemm_chain(consumer_wait=&quot;none&quot;))      # ['read-before-wait: gemm2.mainloop reads H']
+independent_operands(*ks), latest_wait(*ks)      # (['W2'], 2)
+</code></pre>
+<h4>关键问题</h4>
+<ol>
+<li>后继 kernel 的起点由前驱的哪个时刻决定？wait 返回的时刻呢？</li>
+<li>为什么 trigger 的位置不影响正确性，而 wait 的位置影响？</li>
+<li>contention 存在时，为什么最早的 trigger 不一定最好？</li>
+<li>wait 能不能放得比“第一个读 H 的 phase”更晚？更早会怎样？</li>
+</ol>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解与常见坑<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><ul>
+<li><code>timeline</code> 按 kernel 顺序走，维护“前驱的 start、trigger 时刻、实际结束时间”。kernel 0 从 0 开始。对 kernel i ≥ 1，先算起点（规则 1、2），然后逐个 phase 推进时间 t；到第 <code>wait_before</code> 个 phase 时 <code>t = max(t, prev_end + FLUSH_US)</code>。<code>wait_before == len(phases)</code> 时在循环之后对结束时间做同样的 max。</li>
+<li>contention：先用“没有 wait 的名义时间”算出后继第一个等待 phase 的开始 w（没有 wait 时是后继跑完的时间），<code>o = max(0, min(E0, w) − start)</code>，把前驱的结束改成 <code>E0 + contention·o</code>，再用新的结束时间算 wait。别忘了更新 spans 里前驱那一项。</li>
+<li><code>check</code>：对每对相邻 kernel，求前驱的 reads ∪ writes 和 writes；遍历后继 wait 之前的 phase（没有 wait 时是全部），先报读冲突再报写冲突，buffer 名字排序。</li>
+<li><code>best_trigger</code>：用 <code>dataclasses.replace</code> 改 <code>trigger_after</code>，比较时用 <code>&lt;=</code>，这样并列时留下更晚的 trigger。</li>
+</ul>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><details class="answer"><summary>答案</summary><div class="body"><ol>
+<li>起点由前驱的 trigger 决定（trigger 时刻 + <code>PDL_LAUNCH_US</code>），前驱没有 trigger 时由前驱结束决定；wait 返回的时刻永远由前驱<strong>结束</strong>决定（+ flush），和 trigger 无关。</li>
+<li>trigger 只是“可以开始调度后继”的提示，不带任何内存语义；wait 才是唯一的同步点，它保证前驱的所有写对后继可见。所以数据依赖只能由 wait 的位置保证。</li>
+<li>后继提前启动后，它的 CTA 要占 SM、寄存器、SMEM 和带宽。如果前驱还有很多工作没做完，这些资源被抢走会拉长前驱，而前驱的结束又决定了 wait 返回的时刻：trigger 太早可能得不偿失。</li>
+<li>可以更晚（例如 epilogue 前），但没有必要，只会白白推迟；不能更早于第一个读 H 的 phase，否则就是 read-before-wait。最晚的<strong>正确</strong>位置 <code>latest_wait</code> 通常也是最快的位置：它让最多的独立工作藏在前驱后面。</li>
+</ol>
+</div></details></div></details>
+<h2 id="d4-11">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/d4_pdl_chain.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d4_pdl_chain.py</span><span class="muted small">224 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D4 · PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查 — reference solution.
+
+文档里的例子：Producer 计算 H = X·W1，Consumer 计算 Y = H·W2。Consumer 必须等 H 写完，但它读的 W2 和
+Producer 无关。PDL（Programmatic Dependent Launch，Hopper 起的 CUDA 特性）让 Consumer在 Producer 结束之前
+就开始执行“与 H 无关的部分”（预取 W2、初始化），等到真正要读 H 时再等待。
+
+CUTLASS 里对应两条 device 端指令（include/cutlass/arch/grid_dependency_control.h）：
+- launch_dependent_grids()  = griddepcontrol.launch_dependents：提示后继 kernel 可以开始启动。
+  源码注释原话：它“不影响功能，只影响性能”——太早会和当前 kernel 抢资源，太晚就没有重叠。
+- wait_on_dependent_grids() = griddepcontrol.wait：在它之前不得访问前驱 kernel 可能写的全局内存；
+  它等待前驱 kernel **完全结束并把内存刷出**，不是只等到前驱的 trigger。
+主机端要用 cudaLaunchAttributeProgrammaticStreamSerialization 发射（CUDA Graph 里则是programmatic 依赖边）。
+CUDA runtime 里的同名 API：cudaTriggerProgrammaticLaunchCompletion() / cudaGridDependencySynchronize()。
+
+模型（所有时间单位是微秒）
+- Phase(name, us, reads, writes)：kernel 里顺序执行的一段，reads / writes 是全局 buffer名字的 frozenset。
+- Kernel(name, phases, trigger_after, wait_before)：
+    trigger_after：在第 trigger_after 个 phase **结束后** 调用 launch_dependents（None= 不调用，等价于
+                   kernel 结束时才隐式触发）；
+    wait_before：在第 wait_before 个 phase **开始前** 调用 griddepcontrol.wait（None =不等待）。
+    0 ≤ trigger_after &lt; len(phases)，0 ≤ wait_before ≤ len(phases)（= len 表示在所有phase 之后等待）。
+- 常量：STREAM_GAP_US（普通 stream 里前一个 kernel 结束到下一个开始的空隙）、GRAPH_GAP_US（CUDA graph 节点之间）、
+  PDL_LAUNCH_US（收到 launch_dependents 后到后继 kernel 开始执行的延迟）、FLUSH_US（前驱结束后内存刷出、
+  wait 返回所需的时间）。
+
+API
+    Phase, Kernel, STREAM_GAP_US, GRAPH_GAP_US, PDL_LAUNCH_US, FLUSH_US    given
+    two_gemm_chain(...)                                                     given：文档里的 H = X·W1 → Y = H·W2
+    kernel_time(k) -&gt; float              所有 phase 时长之和
+    trigger_time(k) -&gt; float             从 kernel 开始到 launch_dependents 的时间；trigger_after 为 None 时 = kernel_time(k)
+    timeline(kernels, mode) -&gt; dict      mode ∈ {&quot;stream&quot;, &quot;graph&quot;, &quot;pdl&quot;, &quot;graph_pdl&quot;}；返回
+        {&quot;spans&quot;: [(start, end) 每个 kernel], &quot;phases&quot;: [[(name, start, end), ...]每个 kernel], &quot;total&quot;: 最后一个 end}
+        - kernel 0 从 0 开始，phase 顺序执行；
+        - stream / graph：start_i = end_{i-1} + gap，gap = STREAM_GAP_US / GRAPH_GAP_US；kernel 的 trigger / wait 被忽略；
+        - pdl / graph_pdl（i ≥ 1）：如果前驱有 trigger，start_i = start_{i-1} + trigger_time(k_{i-1}) + PDL_LAUNCH_US；
+          如果前驱没有 trigger，退化成 start_i = end_{i-1} + gap（gap 同上：pdl 用 STREAM_GAP_US，graph_pdl 用 GRAPH_GAP_US）。
+          phase 顺序执行；第 wait_before 个 phase 的开始时间要和 end_{i-1} + FLUSH_US 取max（wait 返回的时刻）；
+          wait_before == len(phases) 时 kernel 的结束时间和它取 max。wait_before 为 None 时不等待（可能不正确，见 check）。
+        - contention（默认 0）：PDL 下后继 kernel 在 wait 之前执行的 phase 和前驱重叠时会抢资源（CUTLASS 注释：
+          “launching a dependent kernel too early can compete with current kernels”）。模型：先按不重叠算出前驱的名义结束
+          时间 E0，后继 wait 之前的那些 phase 覆盖的区间是 [start_i, w_i)（w_i = 第一个等待 phase 的名义开始时间，
+          没有 wait 时 = 后继所有 phase 跑完的时间），重叠 o = max(0, min(E0, w_i) − start_i)，前驱的实际结束时间
+          E = E0 + contention·o（只拉长前驱的结束；它的 trigger 时刻不变）。这个 E 用于 wait 和 spans，并作为下一对的“前驱结束”。
+          stream / graph 模式下 contention 不起作用。
+    best_trigger(kernels, mode=&quot;pdl&quot;, contention=0.0) -&gt; (trigger_after, total)
+                                         对 kernels[0] 枚举 trigger_after ∈ {0, …, len(phases)−1}，返回总时间最短的那个
+                                         （并列时取更大的 trigger_after，也就是更晚的 trigger）。
+    check(kernels) -&gt; list[str]          PDL 下的数据竞争（对每一对相邻 kernel (p, c)检查），按下面的格式逐条返回，
+                                         顺序 = (kernel 序号, phase 序号, buffer 名字排序)：
+        &quot;read-before-wait: &lt;c.name&gt;.&lt;phase&gt; reads &lt;buf&gt;&quot;     c 在 wait 之前（或没有 wait 时任何位置）的 phase 读了 p 写的 buffer
+        &quot;write-before-wait: &lt;c.name&gt;.&lt;phase&gt; writes &lt;buf&gt;&quot;   c 在 wait 之前写了 p 读或写的 buffer（WAR / WAW）
+        没有问题时返回 []。trigger 的位置不影响检查结果（trigger 不保证可见性，正确性只靠 wait）。
+    independent_operands(producer, consumer) -&gt; list[str]
+                                         consumer 读的 buffer 里 producer 不写的那些（排序）。它们可以在 wait 之前加载，
+                                         对应 CUTLASS example 63 里在 griddepcontrol.wait 之前预取的权重。
+    latest_wait(producer, consumer) -&gt; int
+                                         让 check 通过、且 wait 尽量晚的位置：consumer第一个“读 producer 写的 buffer 或
+                                         写 producer 读写的 buffer”的 phase 序号；没有这样的 phase 时返回 len(phases)。
+    speedup(kernels, base, opt) -&gt; float timeline(base)[&quot;total&quot;] / timeline(opt)[&quot;total&quot;]
+&quot;&quot;&quot;
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+STREAM_GAP_US = 3.0    # 普通 stream：前一个 kernel 完全结束到下一个开始执行
+GRAPH_GAP_US = 1.0     # CUDA graph：节点之间的空隙更小
+PDL_LAUNCH_US = 0.5    # 收到 launch_dependents 之后，后继 kernel 开始执行的延迟
+FLUSH_US = 0.5         # 前驱 kernel 结束后到 griddepcontrol.wait 返回（内存刷出）
+
+
+@dataclass(frozen=True)
+class Phase:
+    &quot;&quot;&quot;kernel 里顺序执行的一段。reads / writes 是全局 buffer 名字的 frozenset。&quot;&quot;&quot;
+    name: str
+    us: float
+    reads: frozenset = frozenset()
+    writes: frozenset = frozenset()
+
+
+@dataclass(frozen=True)
+class Kernel:
+    &quot;&quot;&quot;trigger_after：第几个 phase 结束后 launch_dependents（None = 不调用）；wait_before：第几个 phase 前 wait（None = 不等待）。&quot;&quot;&quot;
+    name: str
+    phases: tuple
+    trigger_after: int | None = None
+    wait_before: int | None = None
+
+
+def two_gemm_chain(trigger_after_main: bool = True, consumer_wait: str = &quot;mainloop&quot;):
+    &quot;&quot;&quot;文档里的例子：producer H = X·W1，consumer Y = H·W2（时长是示意的微秒数）。
+
+    producer：setup(2) → mainloop(20, 读 X W1) → epilogue(4, 写 H)；trigger 在 mainloop 之后（对应 CUTLASS 在最后一个
+    tile 的 mainloop 结束、epilogue 之前调用 launch_dependent_grids），trigger_after_main=False 时不 trigger。
+    consumer：setup(2) → prefetch_w2(5, 读 W2) → mainloop(15, 读 H W2) → epilogue(3,写 Y)；
+    consumer_wait ∈ {&quot;setup&quot;, &quot;prefetch_w2&quot;, &quot;mainloop&quot;, &quot;none&quot;}：在这个 phase 之前 wait（&quot;none&quot; = 不 wait）。
+    &quot;&quot;&quot;
+    f = frozenset
+    prod = Kernel(&quot;gemm1&quot;, (
+        Phase(&quot;setup&quot;, 2.0),
+        Phase(&quot;mainloop&quot;, 20.0, f({&quot;X&quot;, &quot;W1&quot;})),
+        Phase(&quot;epilogue&quot;, 4.0, writes=f({&quot;H&quot;})),
+    ), trigger_after=1 if trigger_after_main else None)
+    cons_phases = (
+        Phase(&quot;setup&quot;, 2.0),
+        Phase(&quot;prefetch_w2&quot;, 5.0, f({&quot;W2&quot;})),
+        Phase(&quot;mainloop&quot;, 15.0, f({&quot;H&quot;, &quot;W2&quot;})),
+        Phase(&quot;epilogue&quot;, 3.0, writes=f({&quot;Y&quot;})),
+    )
+    names = [p.name for p in cons_phases]
+    wait = None if consumer_wait == &quot;none&quot; else names.index(consumer_wait)
+    cons = Kernel(&quot;gemm2&quot;, cons_phases, wait_before=wait)
+    return [prod, cons]
+
+
+def kernel_time(k: Kernel) -&gt; float:
+    &quot;&quot;&quot;所有 phase 时长之和。&quot;&quot;&quot;
+    return float(sum(p.us for p in k.phases))
+
+
+def trigger_time(k: Kernel) -&gt; float:
+    &quot;&quot;&quot;从 kernel 开始到 launch_dependents 的时间；没有 trigger 时等于 kernel_time。&quot;&quot;&quot;
+    if k.trigger_after is None:
+        return kernel_time(k)
+    # trigger 在第 trigger_after 个 phase 结束之后发出
+    return float(sum(p.us for p in k.phases[: k.trigger_after + 1]))
+
+
+def timeline(kernels, mode: str, contention: float = 0.0) -&gt; dict:
+    &quot;&quot;&quot;见模块 docstring。&quot;&quot;&quot;
+    if mode not in (&quot;stream&quot;, &quot;graph&quot;, &quot;pdl&quot;, &quot;graph_pdl&quot;):
+        raise ValueError(f&quot;unknown mode {mode!r}&quot;)
+    use_pdl = mode in (&quot;pdl&quot;, &quot;graph_pdl&quot;)
+    gap = GRAPH_GAP_US if mode in (&quot;graph&quot;, &quot;graph_pdl&quot;) else STREAM_GAP_US
+    spans, phases = [], []
+    prev = None
+    prev_start = prev_end = 0.0
+    for i, k in enumerate(kernels):
+        if i == 0:
+            start = 0.0
+        elif use_pdl and prev.trigger_after is not None:
+            # 后继 kernel 在前驱 trigger 之后启动；它的 phase 可以和前驱的尾巴重叠
+            start = prev_start + trigger_time(prev) + PDL_LAUNCH_US
+        else:
+            # 没有 PDL（或前驱没有 trigger）：前驱完全结束后再加上空隙
+            start = prev_end + gap
+        if use_pdl and i &gt; 0 and contention:
+            # 先算“wait 之前”的部分占了多久，和前驱的名义结束时间比较，求重叠
+            n_pre = len(k.phases) if k.wait_before is None else k.wait_before
+            w = start + sum(p.us for p in k.phases[:n_pre])
+            o = max(0.0, min(prev_end, w) - start)
+            prev_end = prev_end + contention * o
+            spans[-1] = (spans[-1][0], prev_end)
+        t = start
+        ph = []
+        for j, p in enumerate(k.phases):
+            if use_pdl and i &gt; 0 and k.wait_before == j:
+                # griddepcontrol.wait：等前驱完全结束并刷出内存，不是等到它的 trigger
+                t = max(t, prev_end + FLUSH_US)
+            ph.append((p.name, t, t + p.us))
+            t += p.us
+        if use_pdl and i &gt; 0 and k.wait_before == len(k.phases):
+            t = max(t, prev_end + FLUSH_US)
+        spans.append((start, t))
+        phases.append(ph)
+        prev, prev_start, prev_end = k, start, t
+    return {&quot;spans&quot;: spans, &quot;phases&quot;: phases, &quot;total&quot;: max(e for _, e in spans)}
+
+
+def best_trigger(kernels, mode: str = &quot;pdl&quot;, contention: float = 0.0):
+    &quot;&quot;&quot;枚举 kernels[0] 的 trigger 位置，返回 (trigger_after, total)；并列时取更晚的 trigger。&quot;&quot;&quot;
+    best = None
+    for ta in range(len(kernels[0].phases)):
+        ks = [replace(kernels[0], trigger_after=ta)] + list(kernels[1:])
+        tot = timeline(ks, mode, contention)[&quot;total&quot;]
+        # 更晚的 trigger 在并列时优先：同样的收益下，少和前驱抢资源
+        if best is None or tot &lt;= best[1] + 1e-12:
+            best = (ta, tot)
+    return best
+
+
+def _conflicts(prod: Kernel, phase: Phase):
+    &quot;&quot;&quot;phase 和 prod 冲突的 (kind, buf) 列表。&quot;&quot;&quot;
+    p_writes = frozenset().union(*(p.writes for p in prod.phases))
+    p_reads = frozenset().union(*(p.reads for p in prod.phases))
+    out = []
+    for b in sorted(phase.reads &amp; p_writes):
+        out.append((&quot;read&quot;, b))                      # RAW：读前驱的输出
+    for b in sorted(phase.writes &amp; (p_writes | p_reads)):
+        out.append((&quot;write&quot;, b))                     # WAR / WAW：覆盖前驱还在读写的 buffer
+    return out
+
+
+def check(kernels) -&gt; list:
+    &quot;&quot;&quot;见模块 docstring。&quot;&quot;&quot;
+    issues = []
+    for i in range(1, len(kernels)):
+        prod, cons = kernels[i - 1], kernels[i]
+        # 没有 wait 时，整个 kernel 都“在 wait 之前”
+        limit = len(cons.phases) if cons.wait_before is None else cons.wait_before
+        for j in range(limit):
+            p = cons.phases[j]
+            for kind, b in _conflicts(prod, p):
+                issues.append(f&quot;{kind}-before-wait: {cons.name}.{p.name} {kind}s {b}&quot;)
+    return issues
+
+
+def independent_operands(producer: Kernel, consumer: Kernel) -&gt; list:
+    &quot;&quot;&quot;consumer 读的 buffer 里 producer 不写的那些，排序后返回（它们可以在 wait 之前加载）。&quot;&quot;&quot;
+    p_writes = frozenset().union(*(p.writes for p in producer.phases))
+    c_reads = frozenset().union(*(p.reads for p in consumer.phases))
+    return sorted(c_reads - p_writes)
+
+
+def latest_wait(producer: Kernel, consumer: Kernel) -&gt; int:
+    &quot;&quot;&quot;最晚、仍然正确的 wait 位置。&quot;&quot;&quot;
+    for j, p in enumerate(consumer.phases):
+        if _conflicts(producer, p):
+            return j
+    return len(consumer.phases)
+
+
+def speedup(kernels, base: str, opt: str) -&gt; float:
+    &quot;&quot;&quot;timeline(base) 总时间 / timeline(opt) 总时间。&quot;&quot;&quot;
+    return timeline(kernels, base)[&quot;total&quot;] / timeline(kernels, opt)[&quot;total&quot;]</code></pre></div></div></details>
+<h2 id="d4-12">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>三个 kernel 的链 A → B → C：C 能不能在 A 结束前启动？<code>griddepcontrol.wait</code> 等的是“直接前驱”还是“所有前驱”？</li>
+<li>CUDA Graph 里怎样表达 PDL 的依赖边（programmatic dependency edge）？它和普通边在 graph 实例化时有什么不同？</li>
+<li>如果后继 kernel 的 CTA 数比 SM 数还多，提前启动的那部分 CTA 会怎样占资源？这和本题的 contention 模型有什么出入？</li>
+<li>推理框架里，哪些相邻 kernel 对最值得开 PDL（提示：短 kernel、有大的独立 operand、前驱尾部有大块 epilogue）？</li>
+</ul>
+
+<nav class="pager"><a href="d3_warp_specialization.html">← 上一题 D3</a><a href="e1_full_gemm.html">E1 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#d4-1">题面速览</a>
+<a class="o2" href="#d4-2">直觉与类比</a>
+<a class="o2" href="#d4-3">PDL 的价值在哪一层体现</a>
+<a class="o2" href="#d4-4">图解：四种 mode 的时间关系</a>
+<a class="o2" href="#d4-5">逐步演示</a>
+<a class="o2" href="#d4-6">易错点</a>
+<a class="o2" href="#d4-7">对照文档</a>
+<a class="o2" href="#d4-8">真实代码</a>
+<a class="o2" href="#d4-9">上机验证</a>
+<a class="o2" href="#d4-10">三级提示</a>
+<a class="o2" href="#d4-11">参考解</a>
+<a class="o2" href="#d4-12">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>
