@@ -33,6 +33,13 @@ lede: 这套练习依据的学习笔记、CUTLASS / CuTe 官方文档与源码�
 | PDL | [[cutlass:include/cutlass/arch/grid_dependency_control.h|grid_dependency_control.h]] · [[cutlass:examples/63_hopper_gemm_with_weight_prefetch|example 63（weight prefetch）]] |
 | 配置选择 | [[cutlass:include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl|sm90_gmma_builder.inl]] |
 
+## 硬件规格（RTX 5090 / sm\_120 与 H100 对照）
+
+- [NVIDIA RTX Blackwell GPU Architecture 白皮书](https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf)：GB202 / RTX 5090 的 SM 数、Tensor Core 吞吐（Table 3）、GDDR7。
+- [CUDA C++ Programming Guide：Compute Capabilities](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities)：cc 12.0 / 9.0 的线程、寄存器、SMEM 上限。
+- [Blackwell Tuning Guide](https://docs.nvidia.com/cuda/blackwell-tuning-guide/index.html)。
+- [[cutlass:examples/79_blackwell_geforce_gemm|CUTLASS example 79（sm120 GEMM）]]。
+
 ## CUDA 编程指南与 PTX ISA
 
 - [Programmatic Dependent Launch and Synchronization](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#programmatic-dependent-launch-and-synchronization)：`cudaTriggerProgrammaticLaunchCompletion`、`cudaGridDependencySynchronize`、launch 属性。
@@ -47,5 +54,6 @@ lede: 这套练习依据的学习笔记、CUTLASS / CuTe 官方文档与源码�
 ## 边界说明
 
 - CUTLASS / CuTe API 会随版本和 GPU 架构变化；具体的 atom、TMA 操作、MMA 指令、pipeline API 和 launch 参数，以目标版本的官方文档和示例为准。
-- **本仓库的测试不需要 GPU。** Layout 相关的答案来自真实 CuTe 的主机端程序；D2 的 `PipelineState` 来自真实 CUTLASS 头文件；TMA、mbarrier、warp specialization 和 PDL 的运行时行为是照着 CUTLASS 源码写的协议与时间线模拟器，数字是模型数字，不是实测。
+- **Track A–E 的测试不需要 GPU。** Layout 相关的答案来自真实 CuTe 的主机端程序；D2 的 `PipelineState` 来自真实 CUTLASS 头文件；TMA、mbarrier、warp specialization 和 PDL 的运行时行为是照着 CUTLASS 源码写的协议与时间线模拟器，数字是模型数字，不是实测。
+- **Track F 在真实 GPU 上运行。** 参考解在 RTX 5090（`sm_120`，CUDA 13.0）上编译、对拍、计时过；主机部分的期望答案同样来自真实 CuTe（`oracle/f1|f2|f4_*.cpp`）。讲解页里的 TFLOPS 是量级参考，具体数字取决于驱动、时钟和 CUDA 版本。
 - 这些机制真正跑起来需要 Hopper（SM90）或更新的 GPU。讲解页里“在 GPU 上可以这样验证”的说法没有在本机核对。

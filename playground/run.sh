@@ -11,5 +11,5 @@ mkdir -p "$root/playground/build"
 out="$root/playground/build/$(basename "$src" .cpp)"
 ${CXX:-clang++} -std=c++17 -O1 -w \
   -I "$TP/cutlass/include" -I "$TP/cccl/libcudacxx/include" -I "$TP/cccl/cub" -I "$TP/cccl/thrust" \
-  -I "$TP/cuda/include" -I "$root/oracle" "$src" -o "$out"
+  -I "$TP/cuda/include" -I "$root/oracle" -I "$root/gpu" "$src" -o "$out"
 "$out"

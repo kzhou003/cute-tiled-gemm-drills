@@ -45,6 +45,165 @@ e al -> at
 cap: 两条上限都是 layout 代数算出来的（`max_common_vector` 和 `max_alignment`），在 [[cutlass:include/cute/algorithm/copy.hpp@AutoVectorizingCopyWithAssumedAlignment|copy.hpp]] 里取 gcd。只有 tensor 起点指针本身的对齐 layout 看不到：静态 layout 的 tensor 被假定 128 位对齐，动态的只假定 8 位。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+先别管 32×16。拿一个 4×4 的 tile，把两个 layout 的 16 个值都写出来，用手找“两边同时连续”的最长段；然后加一个最小的 swizzle 看它怎样把段切断；再加 padding 看“连续”和“对齐”怎样分家。规律清楚以后，再放大到测试的 32×16，最后写成一般公式。
+
+① 小：tile 4×4，gmem a = (4,4):(8,1)
+
+16 个元素，两边的偏移都能手写。smem 换三种：
+
+```
+行主序 (4,4):(4,1)  → mcv 4
+Sw<1,1,1> ∘ 行主序   → mcv 2
+padding (4,4):(6,1) → mcv 4，对齐只有 2
+```
+
+② 运行例子：tile 32×16，gmem (32,16):(64,1)
+
+测试里的 A tile（K 连续）对上 5 种 smem。
+
+```
+行主序 16 · Sw222 4 · Sw333 8
+pad 18：mcv 16、max_alignment 2
+M-major：1
+```
+
+③ layout 之外的对齐
+
+layout 一样，真实地址却更差：
+
+```
+指针偏移 4 B：16 B → 4 B
+K = 60：行起点 120·r 字节
+  cp.async 16 B → 8 B
+```
+
+④ 一般把 ①–③ 里反复出现的东西写成公式。
+
+```
+mcv = coalesce(a∘b⁻¹) 第 0 模式（stride
+1）
+    ∧ 2^M（有 swizzle 时）
+位宽 = gcd(mcv·w, 对齐a·w, 对齐b·w, 128)
+字节 = min(位宽/8, 每线程值数, 指针对齐)
+```
+
+**✎** 草稿纸：tile 4×4，gmem a = (4,4):(8,1)，smem b = (4,4):(4,1)，half（2 字节）
+
+```text
+0) 约定    tile 坐标 (m,k)，colex 下标 i = m + 4k（m 最快）。a(m,k) = 8m + k，b(m,k) = 4m + k
+1) 把两个 layout 按 i 列出来
+   i     :  0  1  2  3 |  4  5  6  7 |  8  9 10 11 | 12 13 14 15
+   (m,k) : 00 10 20 30 | 01 11 21 31 | 02 12 22 32 | 03 13 23 33
+   a(i)  :  0  8 16 24 |  1  9 17 25 |  2 10 18 26 |  3 11 19 27
+   b(i)  :  0  4  8 12 |  1  5  9 13 |  2  6 10 14 |  3  7 11 15
+2) right_inverse(b)：smem 偏移 j → 下标 i（满足 b(i) = j）
+   j          :  0  1  2  3 |  4  5  6  7 ...
+   i = rinv(j):  0  4  8 12 |  1  5  9 13          right_inverse(b) = (_4,_4):(_4,_1) a(rinv(j)) :  0  1  2  3 |  8  9 10 11          ← j = 0..3 时 a = j；j = 4 时 a = 8 ≠ 4
+   coalesce(a ∘ rinv(b)) = (_4,_4):(_1,_8)：第 0 模式 _4:_1，stride 1 → mcv = 4
+   max_common_layout = rinv ∘ (_4:_1) = _4:_4 → 下标 0, 4, 8, 12 = 第 0 行 (0,0)…(0,3) 3) 不用代数，暴力核对（brute_vector）：smem 里按 n 对齐的块，在 gmem 里也必须是对齐的连续块
+   n = 4：块 [4,8) 存 (1,0)…(1,3)，gmem 偏移 8, 9, 10, 11：起点 8 % 4 = 0 ✓，连续 ✓（另外三块同理）
+   n = 8：块 [0,8) 存 gmem 0, 1, 2, 3, 8, 9, 10, 11 → 第 4 个就断了 ✗      →
+brute_vector = 4 ✓
+4) 换成 Sw<1,1,1>：x ↦ x ^ ((x & 0b100) >> 1)，即第 2 位是 1 时翻转第 1 位（低 M = 1 位不
+动）
+   b(1,0) = 4 = 0b100 → 0b110 = 6     b(1,1) = 5 → 7     b(1,2) = 6 → 4     b(1,3) = 7 → 5
+   smem 块 [4,8) 里存的 gmem 偏移：10, 11, 8, 9 → 两两连续，四个不连续
+   mcv = min(mcv(a, 行主序), 2^M) = min(4, 2) = 2      brute_vector 也是 2 ✓
+5) 换成 padding (4,4):(6,1)：b(m,k) = 6m + k，smem 地址 4、5 是空洞，行起点 0, 6, 12, 18
+   right_inverse 只覆盖从 0 开始的连续段 0..3：_4:_4 → mcv 仍然 = 4
+   max_alignment(b)：logical_divide(f, rinv f) = (_4,_4):(_1,_6) → gcd(4, 6) = 2
+   brute_vector = 2：n = 4 时块 [8,12) 里 10、11 不存在（第 1 行在 6..9）✗
+6) 位宽与 atom（每线程 4 个值，指针 16 B 对齐）。gmem 一侧：max_alignment(a) = gcd(4, 8) = 4（行起点 8r）
+   auto_vector_bits = gcd(mcv·16, gcd(4·16, ma(b)·16, 128))        bytes = min(位宽/8, vector_bytes(4) = 8, 16)
+   行主序        gcd(64, gcd(64, 256, 128) = 64) = 64 位   → 8 B →
+UniversalCopy<uint64_t>
+   Sw<1,1,1>     gcd(32, gcd(64,  32, 128) = 32) = 32 位   → 4 B →
+UniversalCopy<uint32_t>
+   pad 6         gcd(64, gcd(64,  32, 128) = 32) = 32 位   → 4 B →
+UniversalCopy<uint32_t>
+```
+
+下面这张图就是上面的草稿纸，可以换 gmem / smem 和要试的宽度 n。上面是 tile（每格写下标 i 和两边的偏移），中间是 gmem 地址条（每格写这个元素在 smem 的地址），下面是 smem 地址条（每格写这个元素在 gmem 的地址），颜色 = tile 的行 m。smem 条下方的括号是 `brute_vector` 要检查的“按 n 对齐的块”：绿色 ✓ 表示这块在 gmem 里也是对齐的连续块，红色 ✗ 就让这个 n 失败。悬停任意格子，三处会同时高亮同一个元素。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">手算草稿 · 4×4 tile 的两条地址条</div><img src="../figs/b2/b2_new-01.png" alt="手算草稿 · 4×4 tile 的两条地址条" loading="lazy" style="width:100%;aspect-ratio:1461/1687"></figure>
+:::
+
+## 图解详解：从 layout 推出向量宽度
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+这一节把推导链拆成四张图，每张对应一组要实现的函数。默认状态都是测试里的运行例子：A tile 在 gmem 是 `(32,16): (64,1)` （K 连续，ld = 64），smem 有六种选择。
+
+```
+mcv   = max_common_vector(gA, sA)        # 图 1：coalesce(a ∘ right_inverse(b)) 的第 0 模式；
+align = max_alignment(gA), max_alignment(sA)   # 图 3：段起点能保证的 2 的幂
+bits  = auto_vector_bits(gA, sA)         # gcd(mcv·16, align_a·16, align_b·16, 128)
+plan  = copy_plan(gA, sA, vals, ...)     # 图 4：再和每线程值数、指针偏移取 min，挑 copy atom
+```
+
+### 图 1 · `max_common_vector` 的代数：`a ∘ right_inverse(b)`
+
+按 smem 偏移 j = 0, 1, 2, … 往下数：先用 `right_inverse(b)` 找到 smem 第 j 个位置放的是 tile 的哪个元素 i，再用 a 看它在 gmem 的偏移。只要 a(rinv(j)) == j 一直成立，两边就一起连续；第一次不等的位置就是 mcv。绿色是连续前缀，红色是第一个断点，斜线是 `right_inverse` 的定义域之外（padding 的空洞让它在 16 停下）。swizzle 时这里算的是 base 的 mcv，竖虚线是 2^M 截断。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">j → i = rinv(j) → a(i)</div><img src="../figs/b2/b2_new-02.png" alt="j → i = rinv(j) → a(i)" loading="lazy" style="width:100%;aspect-ratio:1461/859"></figure>
+:::
+
+源码：[[cutlass:include/cute/layout.hpp#L1440-L1463|max_common_vector （注释里的后置条件 a(b.get_1d_coord(n)) == n 就是这张图的绿色前缀）]]、
+
+[[cutlass:include/cute/layout.hpp#L1420-L1437|max_common_layout]] 、[[cutlass:include/cute/layout.hpp#L1305|right_inverse]] 。
+
+### 图 2 · swizzle 每 2^M 个元素切一刀：`min(·, 2^M)`
+
+swizzle 只改写偏移的第 [M, M+B) 位（用第 [M+S, M+S+B) 位去异或），低 M 位永远不变。所以连续的 2^M 个元素作为一组整体搬家，组内顺序不变；组和组之间的顺序被打乱了。下图是 smem 前 128 个地址（8 排 × 16），每格写“这里放的是 tile 的 (m,k)”，下方横条是两边都连续的段。注意第 0 行：yyy 位全 0，什么都没动，看起来 16 个都连续；但 mcv 必须对每一段都成立，所以只能取 2^M。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">Swizzle&lt;B,M,S> ∘ (32,16):(16,1) 的 smem 地址</div><img src="../figs/b2/b2_new-03.png" alt="Swizzle&lt;B,M,S> ∘ (32,16):(16,1) 的 smem 地址" loading="lazy" style="width:100%;aspect-ratio:1461/1097"></figure>
+:::
+
+源码：[[cutlass:include/cute/swizzle.hpp#L42-L53|Swizzle 的位图注释（ MBase 个最低位保持不变）]]、[[cutlass:include/cute/swizzle.hpp#L76-L79|apply ： ZZZ ^= YYY]] 、[[cutlass:include/cute/swizzle_layout.hpp#L509-L514|一边是 swizzle ： min(·, 1<<M)]] 、[[cutlass:include/cute/swizzle_layout.hpp#L525-L545|两边都是 swizzle ：相同就不截断]]、[[cutlass:include/cute/swizzle_layout.hpp#L460-L476|max_alignment(Swizzle) = 2^M]] 。
+
+### 图 3 · 连续 ≠ 对齐：`max_alignment`
+
+把 layout 的每一段连续元素（这里是 tile 的每一行）画在一条线性地址轴上。`right_inverse(f)` 覆盖的是从 0 开始的那一段（第 0 行，深色）；`logical_divide(f, right_inverse(f))` 的第 1 个模式的 stride 是下一段的起点。向量宽度 n 要求每一段的起点都是 n 的倍数，所以能保证的对齐 = gcd(段长, 下一段起点)。切换 n，看哪些段起点（▼）通不过。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">每一段的起点能保证几个元素的对齐？</div><img src="../figs/b2/b2_new-04.png" alt="每一段的起点能保证几个元素的对齐？" loading="lazy" style="width:100%;aspect-ratio:1461/837"></figure>
+:::
+
+源码：[[cutlass:include/cute/layout.hpp#L1940-L1951|max_alignment]] 。K = 60 是同一件事出现在 gmem 一侧：行起点 60·r，`gcd(16, 60) = 4` 个 half = 8 字节。CUDA 对向量访存的对齐要求见 [CUDA C++ Programming Guide · Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。
+
+### 图 4 · 从位宽到 copy atom：`copy_plan`
+
+最终字节数是几条上限里最小的那条（都是 2 的幂，所以 gcd 就是 min）。前两条来自 layout 代数（`auto_vector_bits` ），后两条是 layout 看不到的：每个线程到底分到几个值、tensor 起点指针本身的对齐。条形图的横轴是字节数（1、2、4、8、16），最短的那根决定结果；下面的表格是能选的 atom。默认状态就是 sgemm\_sm80 的配置：`Swizzle<3,3,3>` + 每线程 8 个 half + `cp.async` 16 B。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">copy_plan(a, b, vals_per_thread, base_offsets_bytes, async_)</div><img src="../figs/b2/b2_new-05.png" alt="copy_plan(a, b, vals_per_thread, base_offsets_bytes, async_)" loading="lazy" style="width:100%;aspect-ratio:1461/1247"></figure>
+:::
+
+源码：[[cutlass:include/cute/algorithm/copy.hpp#L246-L263|AutoVectorizingCopyWithAssumedAlignment 的两行 gcd]] 、[[cutlass:include/cute/arch/copy.hpp#L46|UniversalCopy]] 、[[cutlass:include/cute/arch/copy_sm80.hpp#L47-L53|cp.async 只收 4/8/16 字节的 static_assert]] 、[[cutlass:examples/cute/tutorial/sgemm_sm80.cu#L357-L372|sgemm_sm80.cu ： Swizzle<3,3,3> 的 smem atom + SM80_CP_ASYNC_CACHEALWAYS<uint128_t>]] 。指令本身：[PTX ISA · cp.async](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async)（cp-size 只能是 4、8、16；`.cg` 只能 16）。
+
+### 速查
+
+| 函数 | 规则 | 小例子 4×4（a = (4,4):(8,1)） | 运行例子 32×16（a = (32,16):(64,1)） |
+|---|---|---|---|
+| `max_common_vector` | coalesce(a ∘ rinv(b)) 第 0 模式 stride 1 → 它的 size，否则 1；一边 swizzle：min(·, 2^M)；两边同一个 swizzle：不截断 | 行主序 4 ·Sw&lt;1,1,1> 2· pad 6 → 4· M-major 1 | 行主序 16 ·Sw222 4 ·Sw333 8 · pad 18 → 16 · M-major 1 |
+| `max_common_layout` | rinv(b) ∘ 那个第 0 模式；值是 tile 下标；swizzle 截到前 2^M 个 | `_4:_4`（Sw：`_2:_4` ） | `_16:_32`（Sw222：`_4:_32` ） |
+| `brute_vector` | 最大的 2 的幂 n：b 里每个对齐的 n 块，在 a 里也是对齐的连续块 | 行主序 4 ·Sw&lt;1,1,1> 2· pad 6 2 ·M-major 1 | pad 18：2（代数 mcv 是 16） |
+| `max_alignment` | gcd(size(p 第 0 模式), p 第 1 模式 stride)，p = logical\_divide(f, rinv f)；Swizzled：gcd(2^M,base) | a：4 · pad 6：2 · 行主序：16 | pad 18：2 · 行主序：512 · ld 60：4 ·Sw333：8 |
+| `auto_vector_bits` | mcv ≤ 1 → 元素位宽；否则 gcd(mcv·w,gcd(ma(a)·w, ma(b)·w, 128)) | 行主序 64 ·Sw&lt;1,1,1> 32· pad 6 32 ·M-major 16 | 行主序 128 ·Sw222 64 ·pad 18 32 |
+| `vector_bytes` | ≤ cap 且整除 n·elem\_bytes 的最大 2 的幂 | `vector_bytes(4) = 8` | `(16) = 16` ·`(3) = 2` |
+| `alignment_bytes` | 所有偏移的公共 2 的幂对齐，≤ cap；全 0 → cap | `[0] → 16` | `[0,8,24] → 8`· `[4] → 4` |
+| `copy_atom` | 同步 2/4/8/16 B → UniversalCopy&lt;uint16/32/64/128\_t>；cp.async 只有 4/8/16 | 8 B → `UniversalCopy<uint64_t>` | 16 B async → `SM80_CP_ASYNC_CACHEALWAYS< uint128_t>` |
+| `copy_plan` | bytes = min(auto/8, vector\_bytes(vals),alignment\_bytes(offs))；vec = bytes / 2 | 行主序, 4 值 → 8 B | Sw333, 8 值,async → 16 B；指针 +4 B |
+
+→ 4 B；K = 60 → 8 B
+
 ## 逐步演示
 
 ::: steps gmem A tile (32,16):(64,1) 对上 5 种 smem

@@ -47,6 +47,239 @@ e tc -> epi
 cap: 寄存器账：128 × (40 + 232 + 232) = 64512 = 168 × 384。Ping-pong 里 WG1 和 WG2 交替占用 Tensor Core 和 epilogue；Cooperative 里两者同时做同一件事。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+这道题有两本账：寄存器账（函数 `launch_regs_per_thread` 、`validate_setmaxnreg` 、`register_plan` 、`accumulator_regs` ）和时间账（`schedule_cooperative` 、`schedule_pingpong` 、`steady_per_tile` ）。两本账都先用能写满一张纸的小数字算一遍，再换成测试里的数字，最后写成一般公式。
+
+### 寄存器账：从“每线程几个”到“整个 CTA 几个”
+
+① 小：只看“每线程”这一列
+
+先不乘 128。三个 WG 启动时每线程都是 168，重分配后是 40、232、232。
+
+```
+启动：168 + 168 + 168 = 504
+之后：40 + 232 + 232 = 504   ✓ 一样多
+producer 让出 168−40 = 128
+两个 consumer 各要 232−168 = 64
+```
+
+② 测试的默认例子：384 线程，40 / 232
+
+每个 WG 有 128 个线程，所以把 ① 的每个数乘 128。
+
+```
+launch_total = 168 × 384 = 64512
+final_total  = 128 × 504 = 64512
+freed = 128 × 128 = 16384
+needed = 2 × 128 × 64 = 16384
+```
+
+③ 边界：混用 40 / 240，以及 3 个 consumer 每线程那一列一旦超过 504（或 4 × 128 = 512），就越界了。
+
+```
+40 + 240 + 240 = 520 > 504 → E_BUDGET
+512 线程：launch = 128
+24 + 3x ≤ 512 → x ≤ 162.67 → 160
+```
+
+④ 一般
+
+把 ①–③ 写成公式。
+
+```
+launch = ⌊65536 / threads / 8⌋ × 8
+目标值 % 8 == 0 且 24 ≤ 目标值 ≤ 256
+load ≤ launch ≤ mma
+Σ 每个 WG 的目标值 ≤ WG 数 × launch
+```
+
+**✎** 草稿纸 1：384 线程（1 个 producer + 2 个 consumer）的寄存器账
+
+```text
+1) 启动时每线程几个？  65536 / 384 = 170.67 → 取整 170 → 按 8 对齐：170 // 8 = 21，21 × 8 = 168
+   启动时整个 CTA 分到：168 × 384 = 64512        （SM 上还剩 65536 − 64512 = 1024 个没分出去）
+2) 检查目标值：40 % 8 = 0 ✓   24 ≤ 40 ≤ 256 ✓      232 % 8 = 0 ✓   24 ≤ 232 ≤ 256 ✓
+   方向：producer 用 dec，40 ≤ 168 ✓；consumer 用 inc，232 ≥ 168 ✓
+3) 按 WG 记账（每 WG 128 线程）
+           WG0 producer   168 → 40     放出 (168 − 40) × 128 = 128 × 128 = 16384
+           WG1 consumer   168 → 232    取走 (232 − 168) × 128 =  64 × 128 =  8192
+           WG2 consumer   168 → 232    取走 (232 − 168) × 128 =  64 × 128 =  8192
+   freed = 16384      needed = 8192 + 8192 = 16384      → 刚好放出多少就用掉多少
+4) 总量：final_total = 128 × (1·40 + 2·232) = 128 × 504 = 64512 ≤ 64512 ✓   → ok =
+True，errors = []
+5) 换成 40 / 240：  128 × (40 + 240 + 240) = 128 × 520 = 66560 > 64512 ✗
+   → errors = ['E_BUDGET: final 66560 registers > launch allocation 64512']
+   换成 24 / 240：  128 × (24 + 240 + 240) = 128 × 504 = 64512 ✓      （CUTLASS 的“重负载”配置）
+6) 累加器：tile 128×128，fp32，每元素 1 个寄存器，共 16384 个
+   Cooperative：256 个线程分  → 16384 / 256 = 64 个/线程
+   Ping-pong  ：128 个线程独占 → 16384 / 128 = 128 个/线程     （都在 232 以内；≥ 208 才换成 24 / 240）
+```
+
+### 时间账：2 个 tile，两种调度各画一遍
+
+取 `M = 3` （一个 tile 的 MMA 时间）、`E = 2` （一个 WG 写回一整个 tile 的时间）、`n = 2` 个 tile。草稿纸上横轴是时间，每格 1 个单位，每行是一个 WG。
+
+① 小：n = 2，M = 3，E = 2
+
+每个时间格都能写出来。结果两种调度一样长。
+
+```
+Cooperative：(3 + 1) × 2 = 8
+Ping-pong  ：3 + 2 + 1 × 3 = 8
+→ 只有 2 个 tile 时 Ping-pong 没赢
+```
+
+② 测试的例子：M = 10，E = 4
+
+tile 多了以后差距才出来。
+
+```
+n = 4：Coop 48，Ping-pong 44
+n = 8：Coop 96，Ping-pong 84
+利用率 0.833 对 0.952
+```
+
+③ 边界：E > 2M（M = 4，E = 20）
+
+epilogue 太长，Ping-pong 的 epilogue 链成了瓶颈。
+
+```
+每 tile：Coop 4 + 10 = 14
+        Ping-pong max(4, 20) = 20
+n = 4：Coop 56，Ping-pong 84
+```
+
+④ 一般
+
+（已对 n ≤ 11、M ≤ 14、E ≤ 39 全部核对过参考解）
+
+```
+Coop：makespan = n·(M + E/2)
+PP  ：makespan = M + E + (n−1)·max(M, E)
+稳态每 tile：M + E/2 对 max(M, E)
+PP 不慢 ⇔ E ≤ 2M
+```
+
+**✎** 草稿纸 2：n = 2，M = 3，E = 2
+
+```text
+── Cooperative：两个 WG 一起算同一个 tile，一起写回（各写一半，E/2 = 1）──
+   tile 0：mma [0, 3)       两个 WG 都在这一段         epi [3, 4)  两个 WG 各写一半
+   tile 1：mma 从上一个 epi 结束开始 = 4 → [4, 7)      epi [7, 8)
+   t        0  1  2  3  4  5  6  7        ← 第 t 格 = 时间 [t, t+1)
+   WG1      M0 M0 M0 E0 M1 M1 M1 E1
+   WG2      M0 M0 M0 E0 M1 M1 M1 E1
+   TC       ## ## ## .. ## ## ## ..        ← 写回时 Tensor Core 空着
+   makespan = 8，tensor_core_busy = 2 × 3 = 6，utilization = 6 / 8 = 0.75
+   segments 共 8 条：(1,mma,0,0,3) (2,mma,0,0,3) (1,epi,0,3,4) (2,epi,0,3,4)
+(1,mma,1,4,7) ...
+── Ping-pong：tile j 归 WG 1 + j%2，每个 WG 独自写回整个 tile（E = 2）──
+   tile 0 → WG1： mma_start = max(mma_end[−1], epi_end[−2]) = max(0, 0) = 0     → mma [0, 3)
+                  epi_start = max(mma_end[0], epi_end[−1])  = max(3, 0) = 3     → epi [3, 5)
+   tile 1 → WG2： mma_start = max(mma_end[0], epi_end[−1])  = max(3, 0) = 3     → mma [3, 6)
+                  epi_start = max(mma_end[1], epi_end[0])   = max(6, 5) = 6     → epi [6, 8)
+   t        0  1  2  3  4  5  6  7        ← 第 t 格 = 时间 [t, t+1)
+   WG1      M0 M0 M0 E0 E0 .. .. ..
+   WG2      .. .. .. M1 M1 M1 E1 E1
+   TC       ## ## ## ## ## ## .. ..        ← 中间不停，但最后一个 epi（2 格）露在外面
+   makespan = 8，utilization = 6 / 8 = 0.75
+   segments 按 (start, wg) 排序：(1,mma,0,0,3) (1,epi,0,3,5) (2,mma,1,3,6)
+(2,epi,1,6,8)
+── 结论：一样长。Cooperative 每个 tile 露出 E/2 = 1，共 2；Ping-pong 只露出最后一个 E = 2。
+   再加 tile：n = 3 → 12 对 11；n = 4 → 16 对 14。每多一个 tile，Coop 多 M + E/2 = 4，PP多 max(M, E) = 3。
+```
+
+下面这张图可以任意改小参数（n ≤ 6、M ≤ 8、E ≤ 12）。每个时间格里写的是 M + tile 号（MMA）或 E + tile 号（epilogue）。把鼠标停在一段上，面板会写出这一段的起点是由哪两个 `max` 项决定的（被依赖的两段会加粗框出）；移开鼠标，面板打印两个函数的完整返回值。先对照上面的草稿纸，再把 n 改成 3、4，或者把 E 拉到 7 以上（E > 2M）看看谁更快。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">手算草稿 · 两种调度的逐格时间线</div><img src="../figs/d3/d3_new-01.png" alt="手算草稿 · 两种调度的逐格时间线" loading="lazy" style="width:100%;aspect-ratio:1461/1293"></figure>
+:::
+
+## 图解详解：寄存器预算与两种调度
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+这一节有四张可交互的图，每张对应一组要实现的函数。整道题等于下面这段伪代码里的“算账”部分：
+
+```
+plan = register_plan(load_wgs=1, load_regs=40, mma_wgs=2, mma_regs=232)   # 图 1：kernel 开
+acc  = accumulator_regs(128, 128, 256 if cooperative else 128)            # 图 2：一个 cons
+s    = schedule_cooperative(n, M, E) or schedule_pingpong(n, M, E)        # 图 3：持久化 CTA
+per  = steady_per_tile(kind, M, E)                                        # 图 4：tile 很多
+```
+
+### 图 1 · 寄存器预算条：`launch_regs_per_thread` / `validate_setmaxnreg` /
+
+`register_plan`
+
+先看启动寄存器 `launch_regs_per_thread` ：编译器把 65536 均分给每个线程，再向下对齐到 8 的倍数。
+
+| `threads` | `WG` 数 | `65536 / threads` | `// 8 × 8` | `launch_total` | 没分出去 |
+|---|---|---|---|---|---|
+| `128` | `1` | `512` | `512*` | `65536` | `0` |
+| `256` | `2` | `256` | `256` | `65536` | `0` |
+| `384` | `3` | `170.67` | `168` | `64512` | `1024` |
+| `512` | `4` | `128` | `128` | `65536` | `0` |
+| `640` | `5` | `102.4` | `96` | `61440` | `4096` |
+
+\* 只是本题公式的值。真实硬件每线程最多 255 个寄存器，128 线程的 kernel 分不到 512 个；这道题只用到 256 线程及以上的情况。
+
+下面的图把整个 SM 的 65536 个寄存器画成一根横条。第一根是启动时每个 WG 拿到的（都是 launch × 128）；第二根是 setmaxnreg 之后。竖虚线是启动时分到的总数 launch\_total：第二根条超过它就是 `E_BUDGET` （红色斜线）。下方的柱子是“每线程”视角：虚线是 launch，柱高是目标值，箭头向下是 dec（放出），向上是 inc（取走）。拖滑块（步长 4，所以也能拖到不是 8 的倍数的值），看错误码怎样出现。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">register_plan(load_wgs, load_regs, mma_wgs, mma_regs)</div><img src="../figs/d3/d3_new-02.png" alt="register_plan(load_wgs, load_regs, mma_wgs, mma_regs)" loading="lazy" style="width:100%;aspect-ratio:1461/1375"></figure>
+:::
+
+源码对照：`setmaxnreg` 只是两行内联 PTX，见 [[cutlass:include/cutlass/arch/reg_reconfig.h#L81-L95|warpgroup_reg_alloc / warpgroup_reg_dealloc]] ；两份 kernel 各在 producer 分支开头 dec（[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L562|cooperative L562]] 、[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L577|pingpong L577]] ），在 consumer 分支开头 inc（[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L770-L772|cooperative L772]] 、[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L805|pingpong L805]] ）。指令本身的规则（8 的倍数、[24, 256]、整个 warp group 一起执行）见 PTX ISA 的 [setmaxnreg](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#miscellaneous-instructions-setmaxnreg) 一节。
+
+### 图 2 · 累加器住在哪：`accumulator_regs`
+
+consumer 需要 232 个寄存器，主要是为了放累加器。一个 tile\_m × tile\_n 的 fp32 tile 共有 tile\_m·tile\_n 个累加器，平均分给参与 MMA 的线程。Cooperative 的 TiledMMA 用 256 线程（两个 WG 沿 M 各分一半），Ping-pong 一个 WG（128 线程）独占整个 tile。右边的柱子是一个 consumer 线程的 232 个寄存器里，累加器占了多少。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">accumulator_regs(tile_m, tile_n, threads)</div><img src="../figs/d3/d3_new-03.png" alt="accumulator_regs(tile_m, tile_n, threads)" loading="lazy" style="width:100%;aspect-ratio:1461/972"></figure>
+:::
+
+源码对照：kernel 里的同一个公式是 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L131-L151|RegsPerThread 与 HeavyRegisterPressure]] （≥ 208 改用 24 / 240）；Cooperative 沿 M 切成两半来自 builder 的 [[cutlass:include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl#L252-L256|AtomLayoutMNK = 2×1×1]] ，kernel 还用 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L373-L375|static_assert]] 要求 256 线程、tile\_m ≥ 128。
+
+### 图 3 · 两种调度的甘特图：`schedule_cooperative` / `schedule_pingpong`
+
+换成测试的数字（默认 M = 10、E = 4、n = 4）。上半是 Cooperative，下半是 Ping-pong；每块的第三行是 Tensor Core。点“▶ 播放”，竖线沿时间走，面板告诉你此刻每个 WG 在干什么、有序屏障在等谁。要看的三件事：
+
+- Cooperative 的 Tensor Core 行每个 tile 之后都有一段 E/2 的空闲；Ping-pong 的 Tensor Core 行在 E ≤ M 时连成一片，只在最后露出一个 E。
+- Ping-pong 里同一个 WG 的段从不重叠：WG1 的 tile 2 必须等它自己写完 tile 0（`epi_end[j−2]` ），因为累加器寄存器还占着。
+- 切到 E = 16 或 E = 20：Ping-pong 的 MMA 开始“等 epilogue”，Tensor Core 行出现空洞，瓶颈从 MMA 链换成了 epilogue 链。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">schedule_cooperative / schedule_pingpong</div><img src="../figs/d3/d3_new-04.png" alt="schedule_cooperative / schedule_pingpong" loading="lazy" style="width:100%;aspect-ratio:1461/1030"></figure>
+:::
+
+Ping-pong 里那两个 `max` 就是有序屏障的两次 `wait` ：MMA 前的 `wait` 等另一个 WG 把 stage 0（MMA 位）交过来，epilogue 前的 `wait` 等另一个 WG 把 stage 1（epilogue 位）交过来；而“等自己上一个 tile 写完”是同一个 WG 的代码顺序自然保证的。对照 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L155-L158|StagesPerMathWarpGroup = 2]] 、[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L497-L501|group_id = WG 号 − Consumer0]] ，以及 kernel 里的 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L851-L878|MMA 段的 wait / arrive]] 和 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L900-L937|epilogue 段的 wait / arrive]] 。Cooperative 没有这个屏障：两个 WG 在同一段代码里一起走（[[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L791-L845|mma 之后紧跟 epilogue.store]] ）。三种 kernel 设计的官方说明见 [[cutlass:media/docs/cpp/efficient_gemm.md#L231-L250|efficient_gemm.md 的 Hopper Warp Specialization 一节]]。
+
+### 图 4 · 稳态每 tile：`steady_per_tile` ，以及 E = 2M 的交叉点
+
+tile 很多时，makespan ≈ n × 每 tile 时间。横轴是 E，纵轴是每 tile 的时间：Cooperative 是一条斜率 1/2 的直线 `M +` `E/2` ；Ping-pong 先平（`M` ，MMA 链是瓶颈）再以斜率 1 上升（`E` ，epilogue 链是瓶颈）。两条线在 E = 2M 相交。圆点是直接跑模拟得到的 `(makespan(n+2) − makespan(n)) / 2` （n = 6），应当正好落在线上——这就是 hint 2 里建议你自己做的验证。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">steady_per_tile(kind, M, E)</div><img src="../figs/d3/d3_new-05.png" alt="steady_per_tile(kind, M, E)" loading="lazy" style="width:100%;aspect-ratio:1461/905"></figure>
+:::
+
+### 速查
+
+| 函数 | 公式 | 默认例子 |
+|---|---|---|
+| `launch_regs_per_thread (t)` | (65536 // t) // 8 × 8 | 384 → 168，512 → 128 |
+| `validate_setmaxnreg(c)` | c % 8 ≠ 0 → E\_NREG\_MULT8；c 不在 [24, 256] 内 → E\_NREG\_RANGE（两条可以同时出现） | 44 → MULT8；16 → RANGE |
+| `register_plan(...)` | threads = 128·(L+C)；launch\_total = launch·threads；final = 128·(L·l + C·c)；freed = 128·L·(launch − l)；needed = 128·C·(c −launch)；错误顺序 MULT8/RANGE(l) → MULT8/RANGE(c) → DEALLOC\_ABOVE → ALLOC\_BELOW → BUDGET | 64512 / 64512/ 16384 /16384，ok |
+| `accumulator_regs(m, n, t)` | m·n // t | 128×128：Coop 64，PP 128 |
+| `schedule_cooperative` | t 游标：mma [t, t+M] ×2 WG，epi [t+M, t+M+E/2] ×2 WG；makespan = n·(M + E/2) | (4, 10, 4) → 48 |
+| `schedule_pingpong` | wg = 1 + j%2；s = max(mma\_end[j−1], epi\_end[j−2])；e = max(mma\_end[j], epi\_end[j−1])；makespan = M + E + (n−1)·max(M,E) | (4, 10, 4) → 44 |
+| 共同收尾 | 按 (start, wg) 稳定排序；busy = n·M；utilization = busy / makespan（makespan = 0 时为 0） | (8, 10, 4)：0.833 / 0.952 |
+| `steady_per_tile` | cooperative → M + E/2；pingpong → max(M, E)；其它 → ValueError | (10, 16)：18.0 /16 |
+
 ## 逐步演示
 
 ::: steps M = 10，E = 4 的 Ping-pong，4 个 tile
@@ -115,6 +348,37 @@ if (warp_group_role == WarpGroupRole::Producer) {
 ```
 
 有序屏障的关键：group 0 从相反的 phase 起步（“Group 0 starts with an opposite phase”），`arrive()` 通知 `(group_id + 1) % Length` 后 `++stage_`。`SequenceDepth = 2` 的两个 stage 正好是“MMA”和“epilogue”，所以两条链各自交替。
+
+## 真实代码
+
+寄存器常数，简化自 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L139-L148|pingpong kernel]] （Cooperative 在 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L146-L151|L146–151]] ，常数相同）：
+
+```
+static_assert(NumMMAThreads == 128, "Pingpong kernel must have TiledMMA operating using 12
+static_assert(MaxThreadsPerBlock == 384, "Pingpong kernel must have 384 threads in total."
+static constexpr int RegsPerThread = (TileM * TileN * sizeof(ElementAccumulator)) / (NumMM
+static constexpr bool HeavyRegisterPressure = RegsPerThread >= 208;
+static constexpr uint32_t LoadRegisterRequirement = !HeavyRegisterPressure ? 40 : 24;
+static constexpr uint32_t MmaRegisterRequirement  = !HeavyRegisterPressure ? 232 : 240;
+```
+
+`RegsPerThread` 就是本题的 `accumulator_regs` 。角色分派和两条有序链，简化自 [[cutlass:include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L576-L937|pingpong operator()]] ：
+
+```
+if (warp_group_role == WarpGroupRole::Producer) {
+  cutlass::arch::warpgroup_reg_dealloc<LoadRegisterRequirement>();   // setmaxnreg.dec 40
+  ...                                                                // TMA 发射、调度器、ep
+} else {                                                             // Consumer0 / Consum
+  cutlass::arch::warpgroup_reg_alloc<MmaRegisterRequirement>();      // setmaxnreg.inc 232
+  while (work_tile_info.is_valid()) {
+    math_wg_order_barrier.wait();   collective_mainloop.mma(...);     math_wg_order_barrie
+    math_wg_order_barrier.wait();   collective_epilogue.store(...);   math_wg_order_barrie
+    ...                             // 跳到下一个属于自己的 tile（隔一个）
+  }
+}
+```
+
+有序屏障的两个关键行，简化自 [[cutlass:include/cutlass/pipeline/sm90_pipeline.hpp#L1281-L1372|OrderedSequenceBarrier]] ：`stage_({0, params.group_id == 0, 0})` （“Group 0 -starts with an opposite phase”），以及 `arrive()` 通知 `(group_id + 1) % Length` 后 `++stage_` 。`SequenceDepth =` `2` 的两个 stage 正好是 “MMA” 和 “epilogue”，所以两条链各自交替。
 
 ## 上机验证
 

@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">D1 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 55 分钟 · 中</div><h1>D1 · TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</h1><p class="lede">把 TMA 加进 GEMM 的第一步：生产者不再让 128 个线程各算地址，而是由一个线程发一条带“张量描述符”的指令，硬件把整块 box 搬进 shared memory。本题复刻 CuTe 建描述符时检查的硬件限制，算出 mbarrier 要等的字节数，模拟越界填零，并和真实 CuTe 的 GMMA swizzle atom 在真实 smem 指针上逐个地址对拍。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d1_tma_box.py"><code>mine/d1_tma_box.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d1_tma_box.py"><code>tests/test_d1_tma_box.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d1_tma_box.py"><code>solutions/d1_tma_box.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D1"> 我已完成这道题</label></header>
 <h2 id="d1-1">题面速览</h2>
@@ -305,14 +317,189 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="d1-3">图解：一次 box load 的数据路径</h2>
 
 <figure class="flow"><div class="flow-head">从描述符到 SMEM<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;从描述符到 SMEM&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;TmaDesc&quot;, &quot;s&quot;: &quot;gdims · gstrides · box&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;v&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;validate&quot;, &quot;s&quot;: &quot;十条硬件规则&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;box 坐标 c&quot;, &quot;s&quot;: &quot;g = start + c·estride&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;o&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;越界？&quot;, &quot;s&quot;: &quot;是 → 写 0&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;swizzle_byte&quot;, &quot;s&quot;: &quot;Sw&lt;B,4,3&gt; on bytes&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;m&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;SMEM + mbarrier&quot;, &quot;s&quot;: &quot;tx += expect_tx&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;v&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;o&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;o&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;v&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;m&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 220.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>合法性只看描述符，与起点无关；越界判断只看起点和 gdims；SMEM 位置只看 box 内坐标和 swizzle。三件事互相独立，测试也分开检查。</figcaption></figure>
-<h2 id="d1-4">逐步演示</h2>
+<h2 id="d1-4">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 64×64 的 bf16 tile。拿一个小到每个格子都能写出来的张量，把一次 box load 从头到尾手算一遍：描述符合不合法、mbarrier 要等多少字节、哪些格子是真数据、哪些是填出来的 0、每个元素落到 SMEM 的第几个字节。然后放大到测试里的尺寸，最后写成一般公式。</p>
+<p>① 小：float 张量 6×5，box 4×4，部分越界</p>
+<p>gdims=(K=6, M=5)，行 pitch 8 个 float = 32 B。box 从 (k, m) = (4, 3) 开始，右边和下边都伸出张量。</p>
+<pre><code>validate = []，elements_per_dim = (4, 4)
+expect_tx = 4·4·4 = 64 B
+真实 4 个元素 16 B + 填零 12 个 48 B
+</code></pre>
+<p>② 测试：A_TILE，half 的 16×32 box</p>
+<p>gdims=(64, 64)，pitch 128 B，32B swizzle。ragged 版本只有 50 行，从 m=32 开始。</p>
+<pre><code>expect_tx = 16·32·2 = 1024 B
+ragged：18 行真实（576 B）+ 14 行填零（448
+B）
+B_TILE 64×64 bf16，128B swizzle：8192 B
+</code></pre>
+<p>③ 边界情况：element stride、负起点、swizzle</p>
+<pre><code>elem_strides=(1,3)：ceil(32/3)=11 行 →
+352 B
+start=(-8, 0)：前 8 列填零（卷积 halo）
+32B swizzle：第 4..7 行的两个 16 B 块对调
+</code></pre>
+<p>④ 一般把 ①–③ 里的规律写成公式。</p>
+<pre><code>epd[i]  = ceil(box[i] / estride[i])
+tx      = Π epd[i] · elem_bytes
+g[i]    = start[i] + c[i]·estride[i]
+越界 ⇔ 某一维 g[i] &lt; 0 或 g[i] ≥ gdims[i]
+SMEM    = Sw&lt;B,4,3&gt;(elem_bytes ·
+colex(c, epd))
+</code></pre>
+<p><strong>✎</strong> 草稿纸 1：float a[m][k]，gdims=(6, 5)，gstrides=(32,)，box=(4, 4)，start=(4, 3)，不 swizzle</p>
+<pre><code class="language-text">约定：a[m][k] 的值写成 10m + k（34 就是 m=3, k=4）。内存里每行 8 个 float（32 B），k = 6, 7 是 pitch 补齐的空位。
+1) validate     rank 2：gdims / gstrides / box / estrides 长度 2,1,2,2              ✓ base 0 % 16 = 0 ✓   gdims 6, 5 ∈ [1, 2^32] ✓   gstrides 32 % 16 = 0 ✓，32 &lt; 2^40 ✓
+                box 4, 4 ∈ [1, 256] ✓   estrides 1, 1 ∈ [1, 8] ✓
+                inner = box[0]·elem_bytes = 4·4 = 16 B，16 % 16 = 0 ✓   swizzle
+&quot;none&quot; ✓   → []
+     对比：pitch 若写成 6 个 float = 24 B → E_GSTRIDE_ALIGN；box[0] 若是 3 → 12 B →
+E_INNER_16B
+2) 字节数       elements_per_dim = (ceil(4/1), ceil(4/1)) = (4, 4)
+                expect_tx_bytes  = 4 · 4 · 4 B = 64 B            ← 和起点无关，只看描述符 3) 逐个 box 坐标 c = (c0, c1)，g = (4 + c0, 3 + c1)：            （0 ≤ g0 &lt; 6 且 0 ≤ g1 &lt; 5 才是真数据）
+         c1=0 → m=3：  k = 4  5  6  7   →  34  35   0   0      ← k=6,7 在 pitch 空位
+里，但 ≥ gdims[0]=6，填 0
+         c1=1 → m=4：  k = 4  5  6  7   →  44  45   0   0
+         c1=2 → m=5：  m=5 ≥ 5          →   0   0   0   0
+         c1=3 → m=6：  m=6 ≥ 5          →   0   0   0   0
+                真实 4 个元素 = 16 B，填零 12 个 = 48 B，合计仍是 64 B = expect_tx   ✓
+4) 地址         源（全局字节）= g0·4 + g1·32       目的（SMEM 字节）= 4·(c0 + 4·c1)，不
+swizzle
+         c=(0,0)  g=(4,3)：src = 16 + 96  = 112   dst = 0
+         c=(1,0)  g=(5,3)：src = 20 + 96  = 116   dst = 4
+         c=(0,1)  g=(4,4)：src = 16 + 128 = 144   dst = 16
+         c=(1,1)  g=(5,4)：src = 20 + 128 = 148   dst = 20
+         c=(3,3)  g=(7,6)：越界，dst = 60 处写 0
+5) 负起点 start=(-2, -1)：  m=-1 → 0 0 0 0 │ m=0 → 0 0 0 1 │ m=1 → 0 0 10 11 │ m=2 → 0 0 20 21
+   element stride (1, 2)，box=(4, 3)：epd = (4, ceil(3/2)) = (4, 2)，只取 m = 0, 2 两
+行，tx = 4·2·4 = 32 B
+</code></pre>
+<p><strong>✎</strong> 草稿纸 2：half 的 box=(16, 8)，32B swizzle：SMEM 里每个 16 B 块去哪</p>
+<pre><code class="language-text">inner = 16·2 = 32 B ≤ 32（E_SWIZZLE_SPAN 通过）。box 共 8 行 × 32 B = 256 B = 两条 128 B
+线。
+第 r 行的两个 16 B 块：线性字节 32r（块 0）和 32r + 16（块 1）。
+Swizzle&lt;1,4,3&gt;：把第 7 位（第几条 128 B 线的最低位）异或进第 4 位（块号的最低位）
+         r = 0..3：32r &lt; 128，第 7 位 = 0                 → 不动
+         r = 4..7：32r ≥ 128，第 7 位 = 1 → 第 4 位翻转   → 块 0 和块 1 对调
+         r=4：块 0  128 = 0b1000_0000 → 0b1001_0000 = 144     块 1  144 → 128
+         r=5：块 0  160 → 176                                   块 1  176 → 160
+所以 smem_byte_offset((k=0, m=4)) = 144，换成元素就是 72：tile_element_map(8, 16, 2,
+&quot;32B&quot;)[:8] = [0, 16, 32, 48, 72, 88, 104, 120]
+128B 模式同理，只是 3 位：第 r 行（每行 128 B）的块 c 去 c ^ (r % 8)。
+</code></pre>
+<p>下面这张图就是草稿纸 1 的张量，可以随意移动 box、改 box 大小和 M 方向的 element stride。左边是全局内存（每格写值 10m+k，灰色斜线是 pitch 补齐的空位），右边是搬进 SMEM 的稠密 box。绿色是真数据，红色斜线是越界填零。下方面板打印 <code>validate</code> 、<code>elements_per_dim</code> 、<code>expect_tx_bytes</code> 和 <code>unswizzle(box_load(...))</code> 应该返回的东西。先用默认预设对照草稿纸，再自己拖。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · float 6×5 张量上的 TMA box</div><img src="../figs/d1/d1_new-01.png" alt="手算草稿 · float 6×5 张量上的 TMA box" loading="lazy" style="width:100%;aspect-ratio:1461/1496"></figure>
+<h2 id="d1-5">图解详解：描述符、字节数、越界与 swizzle</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>前面的流程图只给了三条互相独立的路径。这一节每条路径配一张可交互的图，每张对应一个或几个要实现的函数。点按钮、拖滑块、把鼠标停在格子上，下方面板会把当前状态逐步代入公式。</p>
+<p>整道题在真实 kernel 里对应下面这几行伪代码。生产者 warp 的一个线程发 TMA，消费者等 mbarrier：</p>
+<pre><code>desc = make_tma_copy_desc(gA, smem_layout)          # 主机端：layout → TmaDesc，validate 的十
+# ---- kernel，生产者线程 ----
+mbar.arrive_and_expect_tx(expect_tx_bytes(desc))   # 先报这一轮要来多少字节（图 2）
+tma_load(desc, mbar, smem, start=(k0, m0))         # 硬件：逐个 box 坐标 → 全局坐标 → 越界写 0
+                                                   #       → SMEM 字节位置 = swizzle_byte(.
+# ---- 消费者 ----
+mbar.wait(phase)                                   # tx 归零才放行：越界填零的字节也必须算进去
+wgmma(smem, ...)                                   # 按同一个 swizzle 读；CPU 上用 unswizzle
+</code></pre>
+<h3 id="d1-5-1">图 1 · 描述符合法性：<code>validate</code> 的十条规则</h3>
+<p>每条规则只看描述符本身，和起点无关。选一个预设，或者单独改某个字段，看哪几条变红。注意三件事：</p>
+<ul>
+<li>gstrides 是字节：128 B 合法，100 B 和 120 B 不是 16 的倍数。</li>
+<li><code>E_INNER_16B</code> 和 <code>E_SWIZZLE_SPAN</code> 都看最内层一行的字节数 <code>box[0]·elem_bytes</code> ，不看整个 box。</li>
+<li>维数对不上（“gstrides=()”）时只报 <code>E_RANK</code> ，后面九条直接跳过（灰色）。swizzle 名字不认识时也不再查跨度。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">validate(desc)：按顺序检查，全部报告</div><img src="../figs/d1/d1_new-02.png" alt="validate(desc)：按顺序检查，全部报告" loading="lazy" style="width:100%;aspect-ratio:1461/1205"></figure>
+<p>源码对照：这些检查在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L955-L1024">make_tma_copy_desc 的 assert</a> ，随后的驱动调用在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L1036-L1059">cuTensorMapEncodeTiled</a> （注意<code>gmem_prob_stride.data() + 1</code> ：维度 0 的 stride 隐含为一个元素，正是本题 <code>gstrides</code> 从维度 1 开始的原因）。驱动端的完整限制见 <a href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html">CUDA Driver API · Tensor Map Object Management</a>。</p>
+<h3 id="d1-5-2">图 2 · expect_tx 与越界填零：测试尺寸的 A_TILE</h3>
+<p>换到测试里的尺寸：half 张量 gdims=(K=64, M)，box=(16, 32)。左边是全局张量（每格 = 1 个 half，缩得很小），box 选中的每一行画成一条 16 元素的横条：绿色是真数据，红色斜线是越界。右边是 SMEM 里的字节账本：每一行 box 占 16·2 = 32 B，按行叠起来就是 expect_tx。默认是测试 <code>test_box_load_out_of_bounds_fills_zero</code> ：只有 50 行，从 m=32 开始，第 18 行起全部填零，但账本的总长度仍然是 1024 B。</p>
+<p>试试 element stride = 3：box 的 32 行只取 m = 32, 35, …, 62 这 11 行，账本缩成 352 B。再试“负起点”：start=(-8, 0)，每行左半边越界。</p>
+
+<figure class="flow snap"><div class="flow-head">box_load 的字节账本：越界填零也算 tx</div><img src="../figs/d1/d1_new-03.png" alt="box_load 的字节账本：越界填零也算 tx" loading="lazy" style="width:100%;aspect-ratio:1461/1248"></figure>
+<p>源码对照：CUTLASS 的 Hopper 主循环把 tx 字节数写成编译期常量，就是整块 smem tile 的大小，根本不看边界，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L264-L269">TmaTransactionBytes</a> ；它被交给 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L625-L639">arrive_and_expect_tx</a> （PTX <code>mbarrier.arrive.expect_tx</code> ）。TMA 指令本身是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm90_tma.hpp#L103-L133">SM90_TMA_LOAD_2D</a> 里的 <code>cp.async.bulk.tensor.2d…mbarrier::complete_tx::bytes</code> 。CuTe 编码描述符时选的<code>CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE</code> （<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L1041">copy_traits_sm90_tma.hpp</a> ）就是“越界填 0”（另一种选项是填 NaN）。PTX 文档里对应的几节：<a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk-tensor">cp.async.bulk.tensor</a>、<a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-bounding-box">tiled 模式的 bounding box</a>、<a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-traversal-stride">traversal stride（element stride）</a>、<a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-oob-access">越界访问</a>；CUDA 编程指南的 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#using-tma-to-transfer-multi-dimensional-arrays">Using TMA to transfer multi-dimensional arrays</a> 有完整的主机端编码 + kernel 端 <code>expect_tx</code> 示例。</p>
+<h3 id="d1-5-3">图 3 · <code>swizzle_byte</code> ：Swizzle&lt;B,4,3&gt; 在字节地址上读哪几位、写哪几位</h3>
+<p>把字节偏移写成二进制，从右往左分三段：bit 0–3 是 16 B 块内的字节（永远不动），bit 4–6 是 128 B 线里的第几个 16 B 块，bit 7–9 是第几条 128 B 线。swizzle 只做一件事：把线号的低 B 位异或进块号的低 B 位。所以块不会被拆开（低 4 位不动），数据也不会离开自己的 128 B 线（第 7 位以上不动）。</p>
+
+<figure class="flow snap"><div class="flow-head">off ^ ((off & yyy) >> 3)，yyy = ((1&lt;&lt;B)−1) &lt;&lt; 7</div><img src="../figs/d1/d1_new-04.png" alt="off ^ ((off & yyy) >> 3)，yyy = ((1&lt;&lt;B)−1) &lt;&lt; 7" loading="lazy" style="width:100%;aspect-ratio:1461/903"></figure>
+<p>源码对照：通用的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">cute::Swizzle&lt;B,M,S&gt;</a> （注释里的 <code>YYY</code> / <code>ZZZ</code> 图示就是上面这三行），作用在指针字节地址上的是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/pointer_swizzle.hpp#L84-L88">swizzle_ptr::apply_swizzle</a> 。PTX 对四种模式的官方画法见 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-swizzling-modes">Tensor swizzling modes</a>。</p>
+<h3 id="d1-5-4">图 4 · box → SMEM：每个 16 B 块落在哪条线的哪个槽</h3>
+<p>左边是逻辑 box：每行 <code>box[0]·elem_bytes</code> 字节，切成 16 B 的块，块按行内序号上色（块 0 蓝、块 1 紫……）。右边是 SMEM：每行一条 128 B 线、8 个 16 B 槽。不 swizzle 时颜色一列一列排得整整齐齐；打开 swizzle 后，同一种颜色（同一列 k 的数据）在不同行落到不同的槽里，这就是 WGMMA 和 TMA 读写都没有 bank conflict 的原因。默认是草稿纸 2：half 的 16×8 box、32B swizzle，第 4–7 行两块对调。</p>
+
+<figure class="flow snap"><div class="flow-head">smem_byte_offset：逻辑 (行, 块) → SMEM (线, 槽)</div><img src="../figs/d1/d1_new-05.png" alt="smem_byte_offset：逻辑 (行, 块) → SMEM (线, 槽)" loading="lazy" style="width:100%;aspect-ratio:1461/1212"></figure>
+<p>源码对照：GMMA 的 smem atom（<code>Layout_K_SW32/64/128_Atom</code> ）在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm90_gmma.hpp#L70-L84">mma_traits_sm90_gmma.hpp</a> ，atom 的<code>Swizzle&lt;B,4,3&gt;</code> 被 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma_swizzle.hpp#L48-L73">get_tma_swizzle_bits</a> 翻译成 TMA 的 swizzle 模式：TMA 写和 WGMMA 读必须用同一个花样。</p>
+<h3 id="d1-5-5">速查</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>公式</th>
+<th>小例子（草稿纸）</th>
+<th>测试尺寸</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>validate(desc)</code></td>
+<td>先查 rank / 长度，不对只报 E_RANK；再按顺序查 ALIGN · GDIM ·GSTRIDE_ALIGN ·GSTRIDE_MAX · BOX ·ESTRIDE · INNER_16B ·SWIZZLE_MODE / SPAN</td>
+<td>float (6,5)，pitch 32 → []；pitch 24 → E_GSTRIDE_ALIGN</td>
+<td>B_TILE + &quot;64B&quot; → 只有 E_SWIZZLE_SPAN</td>
+</tr>
+<tr>
+<td><code>elements_per_dim</code></td>
+<td>ceil(box[i] / estride[i])</td>
+<td>(4,3)，estride (1,2) → (4,2)</td>
+<td>(16,32)，estride (1,3) → (16, 11)</td>
+</tr>
+<tr>
+<td><code>expect_tx_bytes</code></td>
+<td>Π elements_per_dim ·elem_bytes（越界也算）</td>
+<td>4·4·4 = 64（真实 16 + 填零 48）</td>
+<td>1024 · 8192 · 352</td>
+</tr>
+<tr>
+<td><code>swizzle_byte(off, m)</code></td>
+<td>off ^ ((off &amp; (((1&lt;&lt;B)−1)&lt;&lt;7)) &gt;&gt; 3)</td>
+<td>32B：128 → 144</td>
+<td>128B：421 → 405，1152 → 1168</td>
+</tr>
+<tr>
+<td><code>smem_byte_offset</code></td>
+<td>swizzle_byte(eb · (c0 + epd0·c1 + …))</td>
+<td>(k=0, m=4)，half 16 宽，32B → 144</td>
+<td>B_TILE (0, 1) → 144</td>
+</tr>
+<tr>
+<td><code>box_load</code></td>
+<td>g = start + c·estride；越界写 0；src = g0·eb + Σg[i]·gstrides[i−1]</td>
+<td>start (4,3) → [[34,35,0,0],[44,45,0,0],0…]</td>
+<td>50 行 ragged：tile[18:] == 0</td>
+</tr>
+<tr>
+<td><code>unswizzle</code></td>
+<td>out[i·eb] = smem[swizzle_byte(i·eb)]（自逆）</td>
+<td>还原出的逻辑 tile 与 numpy 切片相同</td>
+<td></td>
+</tr>
+<tr>
+<td><code>tile_element_map</code></td>
+<td>out[m + rows·k] = swizzle_byte((m·inner + k)·eb) // eb</td>
+<td>(8, 16, 2, &quot;32B&quot;) 每行首元素 0,16,32,48,72,88,104,120</td>
+<td>(64, 64, 2, &quot;128B&quot;) 每行首元素 0,72,144,216,…</td>
+</tr>
+</tbody>
+</table></div>
+<p>三件事互相独立：合法性只看描述符，越界只看起点和 gdims，SMEM 位置只看 box 内坐标和 swizzle。expect_tx 只看描述符，所以它可以在编译期写成常量。</p>
+<h2 id="d1-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ B_TILE = TmaDesc(2, (64, 256), (128,), (64, 64), swizzle=&quot;128B&quot;)</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;ok&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;合法性&quot;, &quot;s&quot;: &quot;inner = 128 B&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tx&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;expect_tx&quot;, &quot;s&quot;: &quot;64·64·2 = 8192&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;row&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;行 r 的第 0 块&quot;, &quot;s&quot;: &quot;128r ^ 16(r%8)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cu&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;真实 CuTe&quot;, &quot;s&quot;: &quot;4096/4096 一致&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;ok&quot;, &quot;b&quot;: &quot;tx&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tx&quot;, &quot;b&quot;: &quot;row&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;row&quot;, &quot;b&quot;: &quot;cu&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="ok"><div class="step-title">1. 合法性</div><p>inner box = 64 × 2 = 128 字节：是 16 的倍数（<code>E_INNER_16B</code> 通过），且不超过 128B swizzle 的跨度（<code>E_SWIZZLE_SPAN</code> 通过）。行 pitch 128 字节是 16 的倍数。<code>validate(B_TILE) == []</code>。同一个 box 换成 <code>&quot;64B&quot;</code> 就只报一条：<code>E_SWIZZLE_SPAN: inner box 128 bytes &gt; 64B swizzle span</code>。</p>
 </div><div class="step" data-hl="ok,tx"><div class="step-title">2. 字节数</div><p><code>expect_tx_bytes(B_TILE) = 8192</code>。A 的 16×32 half box 是 1024。如果 M 方向 element stride 取 3，box 32 行只取 <code>ceil(32/3) = 11</code> 行：<code>elements_per_dim = (16, 11)</code>，352 字节。生产者在 <code>arrive_and_expect_tx</code> 里报的就是这个数，报错了 mbarrier 永远等不到（D2）。</p>
 </div><div class="step" data-hl="tx,row"><div class="step-title">3. 每一行搬到哪</div><p>box 坐标 (k=0, m=r) 的线性字节偏移是 128r，swizzle 后：<code>[0, 144, 288, 432, 576, 720, 864, 1008]</code>。也就是第 r 行的第 0 个 16 字节块被放到第 r % 8 块上。换成元素偏移就是 <code>[0, 72, 144, 216, …]</code>，正是元素域的 <code>Swizzle&lt;3,3,3&gt;</code>。<span class="cells"><span class="cell on">0</span><span class="cell ">1</span><span class="cell ">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span> <span class="cells"><span class="cell ">0</span><span class="cell on">1</span><span class="cell ">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span> <span class="cells"><span class="cell ">0</span><span class="cell ">1</span><span class="cell on">2</span><span class="cell ">3</span><span class="cell ">4</span><span class="cell ">5</span><span class="cell ">6</span><span class="cell ">7</span></span></p>
 </div><div class="step" data-hl="row,cu"><div class="step-title">4. 和真实 CuTe 对拍</div><p>把真实的 <code>GMMA::Layout_K_SW128_Atom&lt;half_t&gt;</code> 用 <code>tile_to_shape</code> 铺成 64×64，放到一个 smem 指针上，读 <code>&amp;t(m,k) − base</code>：4096 个元素全部等于 <code>tile_element_map(64, 64, 2, &quot;128B&quot;)</code>。32B、64B 两种 atom 也一样（<code>test_tile_element_map_matches_gmma_swizzle_atoms</code>）。</p>
 </div></div></div>
-<h2 id="d1-5">易错点</h2>
+<h2 id="d1-7">易错点</h2>
 <ul>
 <li><strong>把 atom 打印出来的 <code>Sw&lt;3,4,3&gt;</code> 当成元素域的 swizzle。</strong> <code>Sw&lt;3,4,3&gt; o smem_ptr[16b](unset) o (_8,_64):(_64,_1)</code> 里的 swizzle 作用在指针的字节地址上（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/pointer_swizzle.hpp#L80">apply_swizzle</a> 对 <code>uintptr_t</code> 做异或）。直接对 layout 求整数值会得到第 1 行不动（64），真实地址是 72。测试 <code>test_tile_element_map_matches_gmma_swizzle_atoms</code>。</li>
 <li><strong>gstrides 写成元素数。</strong> TMA 的 stride 是字节；40 个 half 一行要写 80。测试 <code>test_box_load_fills_out_of_bounds_with_zero</code> 用的就是 80 字节的 pitch。</li>
@@ -321,12 +508,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>swizzle 跨度只看 box 总大小。</strong> 规则看的是最内层一行的字节数（<code>box[0] × elem_bytes</code>），不是整个 box。</li>
 <li><strong>维数错时继续检查。</strong> 长度对不上时后面的逐维检查会越界；和 CuTe 一样先报 <code>E_RANK</code> 就返回。</li>
 </ul>
-<h2 id="d1-6">对照文档</h2>
+<h2 id="d1-8">对照文档</h2>
 <blockquote>
 <p>“TMA（Tensor Memory Accelerator）允许由指定线程/warp 发起描述符驱动的多维数据搬运，由硬件执行大块 tensor transfer。Layout 仍然重要：描述 tensor 的形状、stride、shared-memory 排布以及 swizzle 等……所以 TMA 并没有让 Layout 失去意义；它改变的是‘执行搬运的机制’，而不是‘数据坐标和物理排布’这件事。”</p>
 </blockquote>
 <p>本题就是这句话的具体内容：描述符里的每个字段都来自 gmem layout，SMEM 排布来自 smem atom；<code>box_load</code> 之后用 <code>unswizzle</code> 还原出的逻辑 tile 和 numpy 切片完全相同，变的只是“谁来搬”。</p>
-<h2 id="d1-7">真实代码</h2>
+<h2 id="d1-9">真实代码</h2>
 <p>CuTe 建描述符时检查的硬件限制（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L929">make_tma_copy_desc</a>）：</p>
 <pre><code class="language-cpp">assert((reinterpret_cast&lt;uint64_t&gt;(gmem_address) &amp; 0b1111) == 0);   // Address must be 16B-aligned
 assert(gmem_prob_shape[i] &gt;= 1 &amp;&amp; gmem_prob_shape[i] &lt;= (uint64_t(1) &lt;&lt; 32));
@@ -337,7 +524,25 @@ assert(smem_box_shape[i] &gt;= 1 &amp;&amp; smem_box_shape[i] &lt;= (uint32_t(1)
 assert(smem_box_stride[i] &gt;= 1 &amp;&amp; smem_box_stride[i] &lt;= 8);
 </code></pre>
 <p><code>E_INNER_16B</code> 和 <code>E_SWIZZLE_SPAN</code> 不在这段 assert 里：它们是 CUDA 驱动文档对 <code>cuTensorMapEncodeTiled</code> 的要求，违反时由驱动返回错误。atom 到 TMA 模式的映射在 <code>get_tma_swizzle_bits</code>：M == 4（16 字节块）时 B = 0/1/2/3 分别是 DISABLE / B32 / B64 / B128。</p>
-<h2 id="d1-8">上机验证</h2>
+<h2 id="d1-10">真实代码</h2>
+<p>CuTe 建描述符时检查的硬件限制，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L955-L1024">make_tma_copy_desc</a> ：</p>
+<pre><code>assert((reinterpret_cast&lt;uint64_t&gt;(gmem_address) &amp; 0b1111) == 0);  // Address must be 16B-
+assert(gmem_prob_shape[i] &gt;= 1 &amp;&amp; gmem_prob_shape[i] &lt;= (uint64_t(1) &lt;&lt; 32));
+assert(gmem_prob_stride[0] == 1 &amp;&amp; &quot;Majorness of smem doesn't match majorness of gmem&quot;);
+assert((gmem_prob_stride[i]) &lt; (uint64_t(1) &lt;&lt; 40));   // Stride must be max 2^40
+assert((gmem_prob_stride[i] &amp; 0b1111) == 0);           // Stride must be multiple of 16B
+assert(smem_box_shape[i]  &gt;= 1 &amp;&amp; smem_box_shape[i]  &lt;= (uint32_t(1) &lt;&lt; 8));  // max 256
+assert(smem_box_stride[i] &gt;= 1 &amp;&amp; smem_box_stride[i] &lt;= 8);
+</code></pre>
+<p><code>E_INNER_16B</code> 和 <code>E_SWIZZLE_SPAN</code> 不在这段 assert 里：它们是 CUDA 驱动文档对 <code>cuTensorMapEncodeTiled</code> 的要求，违反时由驱动返回错误。</p>
+<p>swizzle 作用在字节地址上，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/pointer_swizzle.hpp#L84-L88">swizzle_ptr::apply_swizzle</a> ：</p>
+<pre><code>template &lt;class T&gt;
+static T* apply_swizzle(T* ptr) {
+  return reinterpret_cast&lt;T*&gt;(SwizzleFn::apply(reinterpret_cast&lt;uintptr_t&gt;(ptr)));
+}
+</code></pre>
+<p>atom 到 TMA 模式的映射，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma_swizzle.hpp#L48-L73">get_tma_swizzle_bits</a> ：<code>M == 4</code> （16 字节块）时 <code>B = 0/1/2/3</code> 分别是 <code>DISABLE / B32 / B64 / B128</code> 。</p>
+<h2 id="d1-11">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/d1_tma_box.cpp            # 真实 CuTe 的 GMMA atom 放在真实 smem 指针上
 ./check.sh oracle d1                                   # 重新生成 tests/golden/d1_tma_box.json
 </code></pre>
@@ -351,7 +556,7 @@ physical element offset of (m, k) for k = 0, 8, ..., 56:
 element-domain Swizzle&lt;3,3,3&gt; agrees on 4096 of 4096 elements
 </code></pre>
 <p>每一行的 8 个 16 字节块被异或 m % 8 重新排列：8 行里同一列 k 的块各落在不同位置，WGMMA 和 TMA 都没有 bank conflict。TMA 描述符本身要驱动编码，CPU 上验证不了；有 Hopper（SM90）或更新的 GPU 时，可以用 CUTLASS 的 TMA 例子把 gdims 改成不对齐的值，看 <code>cuTensorMapEncodeTiled</code> 的返回码（本机没有 GPU，未核对）。</p>
-<h2 id="d1-9">三级提示</h2>
+<h2 id="d1-12">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">A = TmaDesc(2, (64, 64), (128,), (16, 32), swizzle=&quot;32B&quot;)
 validate(A)                                   # []
@@ -385,7 +590,7 @@ elements_per_dim(TmaDesc(2, (64, 64), (128,), (16, 32), elem_strides=(1, 3)))   
 <li>元素偏移 e 的字节地址是 2e，<code>Sw&lt;3,4,3&gt;(2e) / 2</code> 等于把位 [6,9) 异或进位 [3,6)，即 <code>Swizzle&lt;3,3,3&gt;</code>。fp32 是 4 字节，同理得 <code>Swizzle&lt;3,2,3&gt;</code>。</li>
 </ol>
 </div></details></div></details>
-<h2 id="d1-10">参考解</h2>
+<h2 id="d1-13">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/d1_tma_box.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d1_tma_box.py</span><span class="muted small">188 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D1 · TMA box：描述符的合法性、expect_tx 字节数、越界填零与 swizzle 后的 SMEM 位置 — reference solution.
 
@@ -575,7 +780,7 @@ def tile_element_map(rows: int, inner: int, elem_bytes: int, mode: str) -&gt; li
         for m in range(rows):
             out[m + rows * k] = swizzle_byte((m * inner + k) * elem_bytes, mode) // elem_bytes
     return out</code></pre></div></div></details>
-<h2 id="d1-11">面试官追问 &amp; 对照源码</h2>
+<h2 id="d1-14">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li><code>make_tma_copy</code> 怎样从一个任意的 gmem layout 和 smem layout 找出 TMA 的“基”（哪几维连续、box 怎么切）？对照同一文件里的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_traits_sm90_tma.hpp#L735">construct_tma_gbasis</a>。</li>
 <li>multicast：一个 cluster 里多个 CTA 要同一块 A，怎样只读一次 gmem？box 为什么要能被 multicast 数整除？</li>
@@ -589,14 +794,22 @@ def tile_element_map(rows: int, inner: int, elem_bytes: int, mode: str) -&gt; li
 <a class="o2" href="#d1-1">题面速览</a>
 <a class="o2" href="#d1-2">直觉与类比</a>
 <a class="o2" href="#d1-3">图解：一次 box load 的数据路径</a>
-<a class="o2" href="#d1-4">逐步演示</a>
-<a class="o2" href="#d1-5">易错点</a>
-<a class="o2" href="#d1-6">对照文档</a>
-<a class="o2" href="#d1-7">真实代码</a>
-<a class="o2" href="#d1-8">上机验证</a>
-<a class="o2" href="#d1-9">三级提示</a>
-<a class="o2" href="#d1-10">参考解</a>
-<a class="o2" href="#d1-11">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#d1-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#d1-5">图解详解：描述符、字节数、越界与 swizzle</a>
+<a class="o3" href="#d1-5-1">图 1 · 描述符合法性：validate 的十条规则</a>
+<a class="o3" href="#d1-5-2">图 2 · expect_tx 与越界填零：测试尺寸的 A_TILE</a>
+<a class="o3" href="#d1-5-3">图 3 · swizzle_byte ：Swizzle&lt;B,4,3&gt; 在字节地址上读哪几位、写哪几位</a>
+<a class="o3" href="#d1-5-4">图 4 · box → SMEM：每个 16 B 块落在哪条线的哪个槽</a>
+<a class="o3" href="#d1-5-5">速查</a>
+<a class="o2" href="#d1-6">逐步演示</a>
+<a class="o2" href="#d1-7">易错点</a>
+<a class="o2" href="#d1-8">对照文档</a>
+<a class="o2" href="#d1-9">真实代码</a>
+<a class="o2" href="#d1-10">真实代码</a>
+<a class="o2" href="#d1-11">上机验证</a>
+<a class="o2" href="#d1-12">三级提示</a>
+<a class="o2" href="#d1-13">参考解</a>
+<a class="o2" href="#d1-14">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

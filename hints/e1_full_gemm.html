@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3 cur" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">E1 · Track E · 完整成熟的 Tiled GEMM · 75 分钟 · 难</div><h1>E1 · 完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</h1><p class="lede">这是 capstone：把 TMA box、SW128 swizzle 的 SMEM 环形缓冲、mbarrier 的 full / empty 两组 barrier、producer / consumer warp group 分工、epilogue 和 PDL 接成一个 Hopper 风格的 GEMM。离散事件模拟器会抓住每一次数据竞争和死锁；结果要和 A @ B.T 逐元素相等，时间线要能看到搬运和计算的重叠。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/e1_full_gemm.py"><code>mine/e1_full_gemm.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_e1_full_gemm.py"><code>tests/test_e1_full_gemm.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/e1_full_gemm.py"><code>solutions/e1_full_gemm.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="E1"> 我已完成这道题</label></header>
 <h2 id="e1-1">题面速览</h2>
@@ -305,7 +317,204 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="e1-3">图解：一个 CTA 里的三个 agent 和两组 barrier</h2>
 
 <figure class="flow"><div class="flow-head">warp-specialized cooperative GEMM（stages = s）<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;warp-specialized cooperative GEMM（stages = s）&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;producer WG&quot;, &quot;s&quot;: &quot;empty → expect → TMA&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ring&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;SMEM ring&quot;, &quot;s&quot;: &quot;s 个 stage · SW128&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;consumer WG 0&quot;, &quot;s&quot;: &quot;行 0..63 · MMA · trigger&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c1&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer WG 1&quot;, &quot;s&quot;: &quot;行 64..127 · MMA&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;epi&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;epilogue&quot;, &quot;s&quot;: &quot;acc → C（裁边）&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;ring&quot;, &quot;t&quot;: &quot;full[s]&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: true, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ring&quot;, &quot;b&quot;: &quot;c0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ring&quot;, &quot;b&quot;: &quot;c1&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c0&quot;, &quot;b&quot;: &quot;epi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c1&quot;, &quot;b&quot;: &quot;epi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c1:b&quot;, &quot;b&quot;: &quot;p:b&quot;, &quot;t&quot;: &quot;empty[s] × 2&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 270.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>不变量：producer 写 stage s 之前 <code>empty[s]</code> 一定完成过（两个 WG 都读完了），consumer 读 stage s 之前 <code>full[s]</code> 一定完成过（两个 box 都落地了）。Sim 的 RAW / WAR 检查就是在验证这两句话。</figcaption></figure>
-<h2 id="e1-4">逐步演示</h2>
+<h2 id="e1-4">从小例子开始：先在草稿纸上手算</h2>
+<p>8 个 k-tile、3 个 stage、三个 agent 同时跑，一上来就看完整时间线很容易乱。先拿一个小到每个事件都能写出来的例子：一个 CTA、4 个 k-tile、2 个 stage。把“哪个格子装哪个 k-tile、谁在等谁、等的是第几次完成”逐行推一遍，然后放大到测试里的 8 个 k-tile，最后写成一般公式。这就是你自己推这道题时草稿纸上该有的东西。</p>
+<p>① 小：128×128×256，stages = 2</p>
+<p>1 个 CTA，k_tiles = 256 / 64 = 4，2 个格子各用两轮。每个事件的时刻都能手算出来。</p>
+<pre><code>s = kt % 2：0 1 0 1
+full  = [[2.0, 4.1], [3.0, 5.1]]
+empty = [[2.6, 4.7], [3.6, 5.7]]
+end 6.7 · trigger 5.7 · overlap 1.6
+</code></pre>
+<p>② 测试的运行例子：K = 512，stages = 3</p>
+<p>8 个 k-tile，3 个格子（256×256 的 4 个 CTA 时间完全相同）。格子够多，TMA 一直忙，变成搬运瓶颈。</p>
+<pre><code>full  = [[2,5,8],[3,6,9],[4,7]]
+end 10.6 · trigger 9.6 · overlap 4.1
+stages 1/2/3/4 → 18.3 / 10.9 / 10.6 /
+10.6
+</code></pre>
+<p>③ 边界：stages = 1 和 200×136×320</p>
+<p>单 stage 时 index 永远是 0、只翻 phase，搬运和计算完全串行。200×136 时最后一行 / 列 CTA 的 box 有一大半越界。</p>
+<pre><code>stages=1：每个 k-tile 2.1 µs，end 18.3，
+overlap 0
+CTA (1,1)：A box 128 行里 72 行有效
+           B box 128 行里 8 行有效，字节仍
+是 16384
+</code></pre>
+<p>④ 一般</p>
+<p>把 ①–③ 的规律写成公式（T = 一个 stage 的 TMA 传输 1.0 µs，往返 = T + 0.5 + 0.6 = 2.1 µs）。</p>
+<pre><code>s = kt % S，r = kt // S
+producer phase = 1 ^ (r &amp; 1)，consumer
+phase = r &amp; 1
+full[s] 第 r+1 次完成 = 2.0 + r·max(2.1,
+S·T) + s·T
+end = 最后一次 full + 0.6 + 1.0
+</code></pre>
+<p><strong>✎</strong> 草稿纸：M = N = 128，K = 256，stages = 2（1 个 CTA，4 个 k-tile）</p>
+<pre><code class="language-text">0) 常量    一个 box = 128×64×2 B = 16384 B，引擎传 16384 / 32768 = 0.5 µs，传完再过 0.5 µs落地
+           一个 stage = A box + B box = 32768 B（expect_tx 声明的数）；MMA 0.6；setup
+0.5；epilogue 1.0
+1) PipelineState：每个 k-tile 用哪个格子、等哪个 phase
+           kt                      0    1    2    3
+           s = index = kt % 2      0    1    0    1
+           r = kt // 2             0    0    1    1     ← 这个格子第几次被用
+           producer phase          1    1    0    0     ← producer_start = (0, 1)，回绕时翻
+           consumer phase          0    0    1    1     ← consumer_start = (0, 0)
+2) producer（setup 0–0.5，之后它的“当前时刻”一直是 0.5，tma 不占 producer 的时间）
+   kt0  wait(empty[0], 1)：empty[0] 完成 0 次，0 % 2 = 0 ≠ 1 → 立刻过 @0.5
+        arrive_expect_tx(full[0], 32768)：arrival 1/1，tx = 32768 → 还不能完成
+        TMA A0  引擎 0.5–1.0，落地 1.5   full[0].tx = 16384
+        TMA B0  引擎 1.0–1.5，落地 2.0   full[0].tx = 0 且 arrival 到齐 → full[0] 第 1
+次完成 @2.0
+   kt1  wait(empty[1], 1) 立刻过 @0.5
+        A1 1.5–2.0 → 2.5，B1 2.0–2.5 → 3.0                 → full[1] 第 1 次完成 @3.0
+   kt2  回到 s = 0，phase 已翻成 0：wait(empty[0], 0) 要完成次数是奇数 → 一直等到 2.6
+        A2 2.6–3.1 → 3.6，B2 3.1–3.6 → 4.1                 → full[0] 第 2 次完成 @4.1
+        （引擎 2.5 就空了，但格子 0 要到 2.6 才还回来：空转 0.1 µs）
+   kt3  wait(empty[1], 0) → 3.6；A3 3.6–4.1，B3 4.1–4.6 → 5.1 → full[1] 第 2 次完成
+@5.1
+3) consumer（两个 WG 的操作一模一样，时刻也一样）
+   kt0  wait(full[0], 0)：需要完成奇数次 → 2.0；MMA 2.0–2.6；两次 arrive → empty[0] 第 1次完成 @2.6
+   kt1  wait(full[1], 0) → 3.0；MMA 3.0–3.6                 → empty[1] 第 1 次完成 @3.6
+   kt2  wait(full[0], 1)：2.6 时 full[0] 只完成 1 次，1 % 2 = 1，不 ≠ 1 → 不过（phase 挡住了“上一轮的满”）
+        → 第 2 次完成 @4.1 才过；MMA 4.1–4.7                → empty[0] 第 2 次完成 @4.7
+   kt3  wait(full[1], 1) → 5.1；MMA 5.1–5.7                 → empty[1] 第 2 次完成 @5.7
+   WG0 在 5.7 trigger；两个 WG 的 epilogue 5.7–6.7         → end = 6.7
+4) 环形缓冲的占用（写 = 第一个 box 开始传 → 最后一个 box 落地；读 = MMA）
+   slot 0：k0 写 0.5–2.0 │ 满 │ 读 2.0–2.6 │ k2 写 2.6–4.1 │ 读 4.1–4.7
+   slot 1：k1 写 1.5–3.0 │ 满 │ 读 3.0–3.6 │ k3 写 3.6–5.1 │ 读 5.1–5.7
+   检查：每次“写”都在上一轮“读”结束之后开始（没有 WAR），每次“读”都在“写”落地之后（没有 RAW）
+5) report
+   tma_busy = [0.5, 2.5] ∪ [2.6, 4.6] = 2.0 + 2.0 = 4.0
+   mma_busy = 4 × 0.6 = 2.4（两个 WG 的区间重合，取并集）
+   overlap  = [2.0, 2.5] + [3.0, 3.6] + [4.1, 4.6] = 0.5 + 0.6 + 0.5 = 1.6
+   → {'end': 6.7, 'trigger': 5.7, 'tma_busy': 4.0, 'mma_busy': 2.4, 'overlap': 1.6}
+   对比：同样 4 个 k-tile，stages = 1 是 9.9，stages = 3、4 是 6.6
+</code></pre>
+<p>下面这张表就是上面草稿纸的“可调”版本：改 stages 和 k-tile 数，每一列是一个 k-tile，每一行是这个 k-tile 经过的一个事件，颜色表示它用哪个 stage 格子。悬停格子会显示这个数是怎么来的；下方面板打印你的函数在这组参数下应该给出的东西（<code>PipelineState</code> 序列、producer 的 op 序列、<code>run_gemm</code> 的 report）。先用默认值对照草稿纸，再试 stages = 1 和 stages = 3。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 每个 k-tile 的事件表</div><img src="../figs/e1/e1_new-01.png" alt="手算草稿 · 每个 k-tile 的事件表" loading="lazy" style="width:100%;aspect-ratio:1461/1585"></figure>
+<h2 id="e1-5">图解详解：一个 k-tile 从 global 到累加器的全过程</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>前面的流程图只画了结构。这一节把整道题拆成八张可交互的图，每张对应一个要实现的部件或一条要满足的规则。点按钮、拖滑块、把鼠标停在色块上，下方的面板会把当前状态代入公式算给你看。所有时刻都由页面里一个 JS 版的 <code>Sim</code> 算出（逐行移植自参考解，和 Python 的结果逐项对拍过）。</p>
+<p>先看全局：整道题的调用关系就是下面这几行。</p>
+<pre><code>for (tm, tn) in CTA 网格:                       # 每个 CTA 独立模拟，时间都从 start 开始
+    full  = [Barrier(1) for s in range(S)]       # producer → consumer：1 次 arrival + 327
+    empty = [Barrier(2) for s in range(S)]       # consumer → producer：两个 WG 各 arrive 一
+    Sim.run([producer(ctx), consumer(ctx, 0), consumer(ctx, 1)])
+# producer : setup →（wait empty[s] → arrive_expect_tx(full[s]) → TMA A → TMA B → advance）
+# consumer : setup →（wait full[s] → MMA(stage s) → arrive(empty[s]) → advance）× k_tiles
+</code></pre>
+<h3 id="e1-5-1">图 1 · <code>PipelineState</code> ：环形下标 + phase 位</h3>
+<p>格子只有 S 个，k-tile 有很多个，所以 k-tile kt 用格子 <code>kt % S</code> ，第 <code>kt // S</code> 次用它。phase 位就是“第几轮”的奇偶：<code>advance()</code> 每次 index 加 1，回到 0 时翻 phase。producer 和 consumer 各有一个 PipelineState，处理同一个 k-tile 时 index 相同、phase 正好相反（producer 从 1 开始）。下面每一格是“第 count 次 advance 之前”的状态，深色是 phase 1、浅色是 phase 0。</p>
+
+<figure class="flow snap"><div class="flow-head">PipelineState.advance() 的序列</div><img src="../figs/e1/e1_new-02.png" alt="PipelineState.advance() 的序列" loading="lazy" style="width:100%;aspect-ratio:1461/828"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L203-L216">PipelineState::operator++</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L268-L277">make_producer_start_state</a> 。最小主循环 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/hopper/wgmma_tma_sm90.cu#L210-L251">wgmma_tma_sm90.cu</a> 里的<code>read_state</code> / <code>write_state</code> 也是同一个类型。</p>
+<h3 id="e1-5-2">图 2 · mbarrier：arrival 计数、tx 字节、phase 的奇偶</h3>
+<p>一个 <code>Barrier</code> 只记三样东西：本 phase 已到的 arrival 数、还欠的 tx 字节、已完成的 phase 数 c。arrival 到齐且 tx = 0 时完成一个 phase（c 加 1，计数清零）。<code>try_wait(P)</code> 只看 <code>c % 2 != P</code> 。自己点几下按钮，或者选一个预设看完整序列：特别看“先 arrive 再 expect_tx”为什么会让 full 在数据落地前就完成。</p>
+
+<figure class="flow snap"><div class="flow-head">一个 mbarrier 的状态机</div><img src="../figs/e1/e1_new-03.png" alt="一个 mbarrier 的状态机" loading="lazy" style="width:100%;aspect-ratio:1461/1056"></figure>
+<p>源码对照：<code>arrive_and_expect_tx</code> 是一条 PTX <code>mbarrier.arrive.expect_tx</code> （<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L577-L590">ClusterTransactionBarrier</a> ），等待是 <code>mbarrier.try_wait.parity</code> 的自旋循环（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L415-L439">ClusterBarrier::wait</a> ）。语义见 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier">mbarrier</a> 一节（phase、pending arrival count、tx-count）。</p>
+<h3 id="e1-5-3">图 3 · 一个 k-tile 的旅程：谁在等谁</h3>
+<p>把一个 k-tile 从“格子空了”到“格子再次空出来”拆成 10 步。上面是 CTA 里的部件，当前这一步用到的部件和箭头高亮；两个 barrier 方框里实时写着 arrival / tx / 完成次数。换 k-tile 看第二轮（r = 1）时 phase 怎么变；换成 stages = 3 的运行例子，看 k3 为什么要等 empty[0]。</p>
+
+<figure class="flow snap"><div class="flow-head">k-tile 的一生：empty → expect → TMA → full → MMA → empty</div><img src="../figs/e1/e1_new-04.png" alt="k-tile 的一生：empty → expect → TMA → full → MMA → empty" loading="lazy" style="width:100%;aspect-ratio:1461/951"></figure>
+<p>源码对照：producer 一侧是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L371-L390">collective 的 load 循环</a> 里的 <code>producer_acquire</code> → 两个</p>
+<p><code>copy(tma_load_x.with(*tma_barrier), …)</code> ；<code>producer_acquire</code> 本身就是“wait empty + arrive_and_expect_tx(full)”（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L528-L535">PipelineTmaAsync::producer_acquire</a> ）。</p>
+<h3 id="e1-5-4">图 4 · 整条时间线与环形缓冲占用</h3>
+<p>这是整道题最该画在草稿纸上的图：横轴是时间，上面一行是 TMA 引擎（串行，一个 box 0.5 µs），下面每个 slot 一行，显示这个格子在什么时候装着哪个 k-tile：写（TMA 在途）→ 满（等 consumer）→ 读（MMA）→ 空闲。“写”结束那一刻就是 full[s] 完成，“读”结束那一刻就是 empty[s] 完成。拖“时刻”滑块，面板会列出那一刻每个格子的状态和两个 barrier 的完成次数。</p>
+<p>看三件事：stages = 1 时所有事都排成一条线；stages = 2 时引擎每两块就空转 0.1 µs（往返 2.1 µs &gt; 2 个 stage × 1.0 µs）；stages ≥ 3 时引擎从 0.5 一直忙到 8.5，MMA 被藏进了搬运里。</p>
+
+<figure class="flow snap"><div class="flow-head">Sim 时间线（1 个 CTA）</div><img src="../figs/e1/e1_new-05.png" alt="Sim 时间线（1 个 CTA）" loading="lazy" style="width:100%;aspect-ratio:1461/1235"></figure>
+<h3 id="e1-5-5">图 5 · <code>tma_box_load</code> ：整块搬、越界填 0</h3>
+<p>TMA 的 box 大小是编译期常量（A、B 都是 128×64），不管 tile 是不是贴着矩阵边。box 里越界的元素写 0，字节数按整块算（否则 expect_tx 声明的 32768 永远等不齐）。左边模式是测试 <code>test_full_gemm_handles_partial_tiles</code> 的 200×136×320：选 CTA 和 k-tile，看 A box、B box 有多少行在界内，以及 epilogue 两个 WG 各写回多少。右边模式是测试 <code>test_tma_box_load_out_of_bounds_fills_zero</code> 的小例子，每个元素都画出来了。</p>
+
+<figure class="flow snap"><div class="flow-head">TMA box 叠在 global tensor 上</div><img src="../figs/e1/e1_new-06.png" alt="TMA box 叠在 global tensor 上" loading="lazy" style="width:100%;aspect-ratio:1461/1171"></figure>
+<p>源码对照：TMA 的 box、OOB 填零和描述符见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/0z_tma_tensors.md">CuTe TMA tensors</a> 和 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk-tensor">cp.async.bulk.tensor</a>。</p>
+<h3 id="e1-5-6">图 6 · SW128：一个 stage 里元素 (m, k) 放在哪</h3>
+<p>A box 是 K-major 的 128×64 half：一行 64 个元素 = 128 字节 = 8 个 16 字节块（每块 8 个元素、占 4 个 bank）。不 swizzle 时，8 行的同一列落在同一个 16 字节块号上，MMA 一次读一列 8 行就是 8 路 bank conflict。<code>sw128(o) = o ^ ((o &gt;&gt; 3) &amp; 0x38)</code> 把行号低 3 位异或进块号：物理块号 = 逻辑块号 ^ (行 % 8)，块内顺序不变。上面是逻辑 tile（按逻辑块号着色），下面是 SMEM 里的物理位置。悬停任意格子看公式；默认选中测试里的 (1, 0) → 72。</p>
+
+<figure class="flow snap"><div class="flow-head">sw128：逻辑 (r, c) → 物理偏移</div><img src="../figs/e1/e1_new-07.png" alt="sw128：逻辑 (r, c) → 物理偏移" loading="lazy" style="width:100%;aspect-ratio:1461/1126"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">cute::Swizzle</a> ；真实 GMMA 布局原子 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm90_gmma.hpp#L84">Layout_K_SW128_Atom_Bits</a> 是作用在位地址上的 <code>Swizzle&lt;3,4,3&gt;</code> ，换算成 16-bit 元素就是本题的 <code>Swizzle&lt;3,3,3&gt;</code> （“上机验证”一节 8192 个位置全部对上）。</p>
+<h3 id="e1-5-7">图 7 · 逐条规则检查：改错一处，Sim 报什么</h3>
+<p>每个按钮把正确实现改坏一处（都是易错点里列的写法），然后用同一个 Sim 重跑。看时间线在哪里断掉、Sim 抛的是哪种错。注意 “empty 只要 1 次 arrival” 在有些配置下 Sim 抓不到：本题两个 WG 的 MMA 同时结束，真正出错的是 empty 每轮完成了两次、phase 奇偶乱掉，要到 k-tile 数超过 2·stages 时才暴露成 RAW（8 个 k-tile 时 stages ≤ 3 会报错，小例子 4 个 k-tile / 2 stage 和 8 / 4 都照常跑完）。所以 <code>Barrier(NUM_CONSUMERS)</code> 要靠你自己保证。</p>
+
+<figure class="flow snap"><div class="flow-head">bug 注入 · Sim 的 RAW / WAR / Deadlock 检查</div><img src="../figs/e1/e1_new-08.png" alt="bug 注入 · Sim 的 RAW / WAR / Deadlock 检查" loading="lazy" style="width:100%;aspect-ratio:1461/1105"></figure>
+<h3 id="e1-5-8">图 8 · PDL：两个 GEMM 串联</h3>
+<p><code>chain</code> 里 gemm2 的 A 是 gemm1 的输出 H，B 是权重 W2。不用 PDL：gemm2 在 gemm1 结束 3.0 µs 后才启动。用 PDL：gemm1 的 WG0 在最后一个 MMA 之后 trigger，0.5 µs 后 gemm2 就启动；它先做 setup、只发 B（W2，和前驱无关）的 TMA，然后在 <code>grid_wait</code> 等到 gemm1 结束 + 0.5 µs，才补发 A。切换开关对比两条时间线。</p>
+
+<figure class="flow snap"><div class="flow-head">chain(X, W1, W2, Cfg(256,256,512), Cfg(256,128,256), pdl)</div><img src="../figs/e1/e1_new-09.png" alt="chain(X, W1, W2, Cfg(256,256,512), Cfg(256,128,256), pdl)" loading="lazy" style="width:100%;aspect-ratio:1461/898"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L83-L100">launch_dependent_grids / wait_on_dependent_grids</a> （各是一条 <code>griddepcontrol</code> PTX）；cooperative kernel 在最后一个 tile 之后 trigger（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L825-L831">launch_dependent_grids 调用处</a>），producer 在发 TMA 之前 wait（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L570">wait_on_dependent_grids 调用处</a>）。概念见 CUDA C++ Programming Guide 的 <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#programmatic-dependent-launch-and-synchronization">Programmatic Dependent Launch and Synchronization</a>。</p>
+<h3 id="e1-5-9">速查：全部公式和不变量</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>部件</th>
+<th>公式 / 规则</th>
+<th>小例子（K=256,S=2）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PipelineState</code></td>
+<td>kt 用 <code>s = kt % S</code> ，第 <code>r = kt // S</code> 轮；producer phase = <code>1 ^ (r &amp; 1)</code> ，consumer phase = <code>r &amp; 1</code> ；S = 1 时 index 恒 0、每步翻 phase</td>
+<td>producer (0,1)(1,1) (0,0)(1,0)</td>
+</tr>
+<tr>
+<td><code>try_wait(P )</code></td>
+<td>已完成次数 c，<code>c % 2 != P</code> 通过 ⇒ producer 等 empty[s] 第 r 次完成，consumer 等 full[s] 第 r+1 次完成</td>
+<td>kt2 的 consumer 要 full[0] 完成 2 次</td>
+</tr>
+<tr>
+<td>full[s]</td>
+<td><code>Barrier(1)</code> ；<code>arrive_expect_tx(A+B = 32768)</code> 一次做完，两个 box 落地各 <code>complete_tx(16384)</code></td>
+<td>[[2.0, 4.1], [3.0, 5.1]]</td>
+</tr>
+<tr>
+<td>empty[s]</td>
+<td><code>Barrier(NUM_CONSUMERS = 2)</code> ；每个 WG MMA 之后 arrive 一次</td>
+<td>[[2.6, 4.7], [3.6, 5.7]]</td>
+</tr>
+<tr>
+<td><code>tma_box_load</code></td>
+<td><code>smem[base + sw128(r·cols + c)] = src[r0+r, c0+c]</code> （越界 = 0），返回 <code>rows·cols·2</code> ；A 的 base = <code>s·BM·BK</code> ，B 的 base = <code>s·BN·BK</code></td>
+<td>每个 box 16384 B</td>
+</tr>
+<tr>
+<td><code>sw128</code></td>
+<td><code>o ^ ((o &gt;&gt; 3) &amp; 0x38)</code> ⇔ 物理块号 = (c // 8) ^ (r % 8)</td>
+<td>(1,0) → 72，(1,8) → 64，(7,0) → 504</td>
+</tr>
+<tr>
+<td>TMA 时间</td>
+<td>开始 = max(发起, 引擎空闲)；传 0.5 µs/box；落地 = 传完 + 0.5</td>
+<td>A0 0.5–1.0 → 1.5</td>
+</tr>
+<tr>
+<td>稳态</td>
+<td>full[s] 第 r+1 次 = 2.0 + r·max(2.1, S·1.0) + s·1.0；end = 最后 full + 0.6 + 1.0；trigger = end − 1.0</td>
+<td>end 6.7，trigger 5.7</td>
+</tr>
+<tr>
+<td>consumer 行</td>
+<td>WG w 读 A 的 <code>[w·BM/2, (w+1)·BM/2)</code> 行、整块 B；epilogue 裁到 <code>min(·, M)</code> 、<code>min(·, N)</code></td>
+<td>WG0 行 0–63，WG1 行 64–127</td>
+</tr>
+<tr>
+<td>PDL</td>
+<td>start₂ = trigger₁ + 0.5，grid_ready = end₁ + 0.5；预取 min(S,k_tiles) 个 B；不用 PDL：start₂ = end₁ + 3.0</td>
+<td>测试：10.1 / 11.1 vs 13.6</td>
+</tr>
+<tr>
+<td>不变量</td>
+<td>TMA 写 slot s 之前，上一轮的 MMA 已读完（WAR）；MMA 读 slot s 之前，本轮两个 box 都已落地（RAW）</td>
+<td>slot 0：读 2.0–2.6，写 2.6–4.1 ✓</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="e1-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ 128×128×512，stages = 3：8 个 k-tile 怎样在 3 个 stage 里流动</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;su&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;setup&quot;, &quot;s&quot;: &quot;0.5 µs&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;t3&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA k0..k2&quot;, &quot;s&quot;: &quot;0.5–3.5&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;m0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;MMA k0&quot;, &quot;s&quot;: &quot;2.0–2.6&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e0&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;empty[0] 完成&quot;, &quot;s&quot;: &quot;2.6&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;k3&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA k3&quot;, &quot;s&quot;: &quot;等 empty[0]&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;稳态&quot;, &quot;s&quot;: &quot;每 1 µs 一个 tile&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;end&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;trigger · epi&quot;, &quot;s&quot;: &quot;9.6 · 10.6&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;su&quot;, &quot;b&quot;: &quot;t3&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t3&quot;, &quot;b&quot;: &quot;m0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;m0&quot;, &quot;b&quot;: &quot;e0&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;e0:r&quot;, &quot;b&quot;: &quot;k3:b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;k3&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;st&quot;, &quot;b&quot;: &quot;end&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="su,t3"><div class="step-title">1. setup 与前三个 stage</div><p>三个 agent 都先花 0.5 µs 做 setup。producer 的 <code>PipelineState.producer_start(3)</code> 是 (index 0, phase 1)：三个 <code>empty[s]</code> 都还没完成过 phase，<code>try_wait(1)</code> 立刻通过，所以它连续填满 3 个 stage。每个 stage 两个 16 KB 的 box，TMA 引擎每个传 0.5 µs：区间是 0.5–1.0、1.0–1.5 …… 3.0–3.5。</p>
 </div><div class="step" data-hl="t3,m0"><div class="step-title">2. 第一个 MMA</div><p>stage 0 的 B box 在 1.5 传完，再过 0.5 µs 落地：<code>full[0]</code> 在 2.0 完成。两个 consumer 的 <code>consumer_start</code> 是 phase 0，<code>try_wait(0)</code> 在 2.0 通过，并行做 0.6 µs 的 MMA（2.0–2.6），各自只读 A 的一半行。</p>
@@ -314,17 +523,17 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="k3,st"><div class="step-title">5. 稳态：搬运是瓶颈</div><p>每个 stage 要 1.0 µs 的 TMA，MMA 只要 0.6 µs：TMA 一直在忙（<code>tma_busy = 8.0</code>），MMA 每 1 µs 做一次（2.0、3.0 …… 9.0，<code>mma_busy = 4.8</code>）。MMA 和 TMA 的重叠 <code>overlap = 4.1</code> µs。</p>
 </div><div class="step" data-hl="st,end"><div class="step-title">6. trigger 和 epilogue</div><p>最后一个 MMA 在 9.6 结束，WG 0 在这里 trigger（<code>report[&quot;trigger&quot;] = 9.6</code>），然后两个 WG 各做 1.0 µs 的 epilogue，CTA 在 10.6 结束。对比 stages = 1：每个 k-tile 都要 1.5 µs（传输 + 延迟）+ 0.6 µs MMA，完全串行，结束在 18.3，<code>overlap = 0</code>。stages = 2 是 10.9，3 和 4 都是 10.6：再多 stage 也快不过 TMA 带宽。</p>
 </div></div></div>
-<h2 id="e1-5">易错点</h2>
+<h2 id="e1-7">易错点</h2>
 <ul>
 <li><strong>producer 从 phase 0 开始。</strong> empty barrier 一开始没完成过任何 phase，<code>try_wait(0)</code> 不通过，三个 agent 全部卡住。测试 <code>test_pipeline_start_states</code>；完整运行时 Sim 报 <code>Deadlock</code>。</li>
-<li><strong>empty 只要 1 次 arrival。</strong> 第一个 WG 做完就放行 producer，第二个 WG 还在读的 stage 被覆盖。<code>run_gemm</code> 的构造要求是 <code>Barrier(NUM_CONSUMERS)</code>；Sim 的 WAR 检查会抓住。</li>
+<li><strong>empty 只要 1 次 arrival。</strong> 真实 kernel 里第一个 WG 做完就放行 producer，第二个 WG 还在读的 stage 会被覆盖。本题两个 WG 同时读完，表现为另一种错：每个 WG 的 arrive 各完成一个 phase，empty 每轮完成两次，phase 奇偶和 producer 对不上。Sim 不一定抓得到：4 个 k-tile / 2 stage、8 / 4 都照常跑完，8 个 k-tile、stages ≤ 3 时才报 RAW（见图 7）。题目给的 <code>run_gemm</code> 构造要求是 <code>Barrier(NUM_CONSUMERS)</code>，这一条要靠你自己保证。</li>
 <li><strong>producer 跳过 empty wait。</strong> TMA 写进一个还没被读完的 stage：Sim 报 <code>RaceError</code>（所有 stages 的正确性用例都会失败）。</li>
 <li><strong>expect_tx 只声明 A 的字节。</strong> full 在 A 落地时就完成，consumer 读 B 时 B 还没到：Sim 报 <code>RAW on stage …</code>。PDL 路径里也一样：先发 B、后发 A，但声明的必须是 A+B。测试 <code>test_producer_pdl_prefetches_weights_before_grid_wait</code>。</li>
 <li><strong>越界部分不搬或少计字节。</strong> TMA 的 box 是整块：边界 tile 里越界行必须是 0（否则累加了上一个 tile 的残留），字节数必须是整块，否则 tx 计数永远不归零。测试 <code>test_tma_box_load_swizzles_and_zero_fills</code>、<code>test_run_gemm_is_correct[MNK2-2]</code>。</li>
 <li><strong>trigger 放在 epilogue 之后或者两个 WG 都 trigger。</strong> 测试 <code>test_consumer_op_sequence_and_single_trigger</code> 要求只有 WG 0、在最后一个 k-tile 之后、epilogue 之前。</li>
 <li><strong>PDL 后继在 grid_wait 之前读了 A。</strong> A 是前驱的输出 H。测试检查 <code>grid_wait</code> 之前的 TMA 只有 B。</li>
 </ul>
-<h2 id="e1-6">对照文档</h2>
+<h2 id="e1-8">对照文档</h2>
 <blockquote>
 <p>“多 stage pipeline 会用多个 shared-memory buffer：计算当前 stage 时，producer 预取后续 stage；consumer 在确认数据 ready 后再消费；stage 被用完后才能释放并复用。……例如一个 warp group 负责 TMA load（producer），其他 warp group 负责 MMA（consumer）。……这里增加的不只是新的 Layout：还需要角色分配、pipeline 状态、barrier、warp-group 同步以及架构特定的指令语义。”</p>
 </blockquote>
@@ -370,7 +579,38 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </tr>
 </tbody>
 </table></div>
-<h2 id="e1-7">上机验证</h2>
+<h2 id="e1-9">真实代码</h2>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L203-L216">PipelineState::operator++</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L268-L277">make_producer_start_state</a> ：</p>
+<pre><code>void operator++() {
+  if constexpr (Stages == 1) { phase_ ^= 1; ++count_; }
+  else { ++index_; ++count_; if (index_ == Stages) { index_ = 0; phase_ ^= 1; } }
+}
+// Producer starts with an opposite phase as the buffers are initially empty
+make_producer_start_state() { return {/*index*/0, /*phase*/1, /*count*/0}; }
+</code></pre>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L528-L535">PipelineTmaAsync::producer_acquire</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L627-L633">consumer_wait</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L644-L649">consumer_release</a> ：</p>
+<pre><code>void producer_acquire(uint32_t stage, uint32_t phase) {
+  empty_barrier_ptr_[stage].wait(phase);                                   // 本题：(&quot;wait&quot;
+  if (params_.is_leader)
+    full_barrier_ptr_[stage].arrive_and_expect_tx(params_.transaction_bytes);  // (&quot;arrive
+}
+void consumer_wait(uint32_t stage, uint32_t phase) { full_barrier_ptr_[stage].wait(phase)
+void consumer_release(uint32_t stage)             { empty_barrier_ptr_[stage].arrive(...)
+</code></pre>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L371-L390">collective 的 load</a> （producer WG 里的一个线程执行）：</p>
+<pre><code>for ( ; k_tile_count &gt; 0; --k_tile_count) {
+  pipeline.producer_acquire(smem_pipe_write);
+  auto* tma_barrier = pipeline.producer_get_barrier(smem_pipe_write);    // = full[s]
+  int write_stage = smem_pipe_write.index();
+  copy(tma_load_a.with(*tma_barrier, mcast_mask_a), tAgA(_,_,_,*k_tile_iter), tAsA(_,_,_,w
+  copy(tma_load_b.with(*tma_barrier, mcast_mask_b), tBgB(_,_,_,*k_tile_iter), tBsB(_,_,_,w
+  ++k_tile_iter;
+  ++smem_pipe_write;
+}
+</code></pre>
+<p>kernel 层的角色分工简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L560-L562">producer 分支</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L772">consumer 分支</a>：producer WG <code>warpgroup_reg_dealloc&lt;40&gt;()</code> 把寄存器让出来，consumer WG <code>warpgroup_reg_alloc&lt;232&gt;()</code> 拿去放累加器（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L150-L151">LoadRegisterRequirement / MmaRegisterRequirement</a> ）。本题没有模拟寄存器，E2 会用到这两个数。</p>
+<p>本题简化掉的部分：TMA multicast 和 cluster（<code>mcast_mask</code> ）、persistent tile scheduler（一个 CTA 循环处理多个 tile）、consumer 侧的 <code>warpgroup_wait&lt;K_PIPE_MMAS&gt;</code> （让 MMA 也异步、晚一拍释放 stage）、epilogue 自己的 TMA store 流水线。</p>
+<h2 id="e1-10">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/e1_full_gemm.cpp      # 真实 CuTe，本机编译运行
 </code></pre>
 <p>本机的真实输出：</p>
@@ -382,7 +622,7 @@ stage bytes (A 128x64 + B 128x64, half) = 32768
 </code></pre>
 <p>两点值得注意。第一，CuTe 打印的是 <code>Sw&lt;3,4,3&gt;</code>，不是本题的 <code>Swizzle&lt;3,3,3&gt;</code>：真实的 swizzle 挂在 smem_ptr 上、作用在字节地址上（16 字节块 = 低 4 位），换算成 16-bit 元素偏移正好是 <code>o ^ ((o &gt;&gt; 3) &amp; 0x38)</code>。只看 layout 的整数值会得到没 swizzle 的 64，必须通过真实指针算偏移才是 72，8192 个位置和给定的 <code>sw128</code> 全部一致。第二，一个 stage 的字节数 32768 就是 producer 传给 <code>arrive_and_expect_tx</code> 的数（<code>TmaTransactionBytes</code>）。</p>
 <p>这个 GEMM 的真实版本需要 Hopper（SM90）的 WGMMA 和 TMA。RTX 5090（SM120）有 TMA 和 mbarrier，但没有 WGMMA，CUTLASS 在它上面用另一套 kernel；本题的协议（stage、phase、full / empty、warp specialization、PDL）在那里同样适用。</p>
-<h2 id="e1-8">三级提示</h2>
+<h2 id="e1-11">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">st = PipelineState.producer_start(3)
 # 连续 advance 7 次看到的 (index, phase)：
@@ -422,7 +662,7 @@ chain(X, W1, W2, Cfg(128, 256, 256), Cfg(128, 128, 256), True)[1]    # [(0.0, 6.
 <li>每个 stage 只能装一个 k-tile 的数据；预取第 <code>stages+1</code> 个 k-tile 的 B 需要先复用 stage 0，而复用要等 consumer 读完 stage 0，consumer 读 stage 0 又要等 A，A 要等 <code>grid_wait</code>：所以 grid_wait 之前最多预取 <code>min(stages, k_tiles)</code> 个 stage。</li>
 </ol>
 </div></details></div></details>
-<h2 id="e1-9">参考解</h2>
+<h2 id="e1-12">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/e1_full_gemm.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/e1_full_gemm.py</span><span class="muted small">465 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;E1 · 完整成熟的 Tiled GEMM：TMA box → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → MMA → epilogue → PDL 串联 — reference solution.
 
@@ -889,7 +1129,7 @@ def chain(X, W1, W2, cfg1, cfg2, pdl):
         start2 = r1[&quot;end&quot;] + STREAM_GAP_US
         Y, r2 = run_gemm(H, W2, cfg2, start=start2, grid_ready=start2)
     return Y, [(0.0, r1[&quot;end&quot;]), (start2, r2[&quot;end&quot;])]</code></pre></div></div></details>
-<h2 id="e1-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="e1-13">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>CUTLASS 的 consumer 不是 MMA 一结束就 release，而是 <code>warpgroup_wait&lt;K_PIPE_MMAS&gt;()</code> 之后才 release 上一个 stage（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L417">collective mma</a>）。WGMMA 是异步的：本题的模型假设 MMA 同步完成，加入异步 MMA 后 empty 的时间线会怎样变？</li>
 <li>真实的 epilogue 先把累加器写进 SMEM，再用 TMA store 写回（还要和下一个 tile 的 mainloop 共享 SMEM）。本题把它简化成一个 <code>compute(EPI_US)</code>：它在 Ping-pong 调度里为什么重要（D3）？</li>
@@ -903,13 +1143,25 @@ def chain(X, W1, W2, cfg1, cfg2, pdl):
 <a class="o2" href="#e1-1">题面速览</a>
 <a class="o2" href="#e1-2">直觉与类比</a>
 <a class="o2" href="#e1-3">图解：一个 CTA 里的三个 agent 和两组 barrier</a>
-<a class="o2" href="#e1-4">逐步演示</a>
-<a class="o2" href="#e1-5">易错点</a>
-<a class="o2" href="#e1-6">对照文档</a>
-<a class="o2" href="#e1-7">上机验证</a>
-<a class="o2" href="#e1-8">三级提示</a>
-<a class="o2" href="#e1-9">参考解</a>
-<a class="o2" href="#e1-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#e1-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#e1-5">图解详解：一个 k-tile 从 global 到累加器的全过程</a>
+<a class="o3" href="#e1-5-1">图 1 · PipelineState ：环形下标 + phase 位</a>
+<a class="o3" href="#e1-5-2">图 2 · mbarrier：arrival 计数、tx 字节、phase 的奇偶</a>
+<a class="o3" href="#e1-5-3">图 3 · 一个 k-tile 的旅程：谁在等谁</a>
+<a class="o3" href="#e1-5-4">图 4 · 整条时间线与环形缓冲占用</a>
+<a class="o3" href="#e1-5-5">图 5 · tma_box_load ：整块搬、越界填 0</a>
+<a class="o3" href="#e1-5-6">图 6 · SW128：一个 stage 里元素 (m, k) 放在哪</a>
+<a class="o3" href="#e1-5-7">图 7 · 逐条规则检查：改错一处，Sim 报什么</a>
+<a class="o3" href="#e1-5-8">图 8 · PDL：两个 GEMM 串联</a>
+<a class="o3" href="#e1-5-9">速查：全部公式和不变量</a>
+<a class="o2" href="#e1-6">逐步演示</a>
+<a class="o2" href="#e1-7">易错点</a>
+<a class="o2" href="#e1-8">对照文档</a>
+<a class="o2" href="#e1-9">真实代码</a>
+<a class="o2" href="#e1-10">上机验证</a>
+<a class="o2" href="#e1-11">三级提示</a>
+<a class="o2" href="#e1-12">参考解</a>
+<a class="o2" href="#e1-13">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

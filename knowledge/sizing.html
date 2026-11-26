@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3 cur" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
+<main>
+<header class="cover"><div class="kicker">领域知识</div><h1>怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</h1><p class="lede">一个 GEMM 里有一堆“数量”：CTA tile 多大、有几个 tile、grid 开几个 CTA、每个 CTA 几个warp、几级 stage。它们不是同一层的东西：有的是硅片焊死的，有的是指令规定的，有的是你选的，剩下的都是推出来的。这一页以 RTX 5090 为例，把这些参数分层，给出从头定一个配置的顺序和每一步的算式，并用 8192³ BF16 GEMM 完整算一遍。</p></header>
+
+<div class="callout key"><div class="callout-title">要点 · 命名：BM / BN / BK 里的 B 是 Block，不是 B 矩阵</div><p>B 指 thread block（线程块，也就是 CTA）。BM = 一个 CTA 负责的输出块在 M 方向有多大，BN、BK 同理。这个写法来自 CUDA 的 block 术语：CuTe 教程写作 <code>bM / bN / bK</code> （注释里是 <code>BLK_M, BLK_N, BLK_K</code> ），CUTLASS 2.x 是 <code>ThreadblockShape::kM</code> ，3.x 是 <code>TileShape</code> ，Triton 是 <code>BLOCK_SIZE_M</code> 。同一套命名往下延伸：CTA 层 BM × BN × BK（如 128 × 128 × 64），warp 层 WM × WN（如 64 × 32），指令层 m × n × k（如 <code>m16n8k16</code> ）。读代码时记住：大写 B 前缀是“块的大小”，单独的 A、B、C 才是矩阵。</p>
+</div>
+<h2 id="k-sizing-1">Tiling 从输出出发，输入是倒推出来的</h2>
+<p>GEMM 的 tiling 是先切输出 C，每个 CTA 负责一块输出并且一直负责到底（output-stationary）；它要搬哪些输入，是从这块输出倒推出来的。</p>
+<p>为什么从输出切</p>
+<ul>
+<li>每个输出元素只归一个 CTA：累加器一直留在这个 CTA 的寄存器里，K 全部算完再写回一次。CTA 之间没有写冲突，也不需要归约。</li>
+<li>K 是归约维：沿 K 切给不同 CTA，几个 CTA 就会算同一个输出的不同部分和，最后还得合并。所以默认 K 不在 CTA 之间分，而是在每个 CTA 内按 BK 一轮一轮循环——M、N 在空间上切，K 在时间上切。</li>
+</ul>
+<p>倒推的顺序</p>
+<pre><code>① 切输出：C[M,N] → BM×BN 的 tile，tile 数 = ceil(M/BM)·ceil(N/BN) = CTA 数
+② 这块输出需要哪些输入：A 的 BM 行（BM×K），B 的 BN 列（BN×K）
+③ K 方向按 BK 循环：每轮搬 A[BM×BK] + B[BN×BK] 进 SMEM
+④ CTA 内部继续切输出：CTA tile → warp tile → MMA atom（16×8）→ 每线程的累加器
+</code></pre>
+<p>每一层都是先切输出，再推出这一层要用哪些输入。CuTe 的写法也是这样：同一个 <code>cta_tiler = (BM, BN, BK)</code> 和 <code>cta_coord = (bm, bn, _)</code> ，用 <code>Step</code> 投影出三块（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L103-L105">sgemm_sm80.cu</a> ）：</p>
+<pre><code>Tensor gA = local_tile(mA, cta_tiler, cta_coord, Step&lt;_1, X,_1&gt;{});  // A 只取 M、K → (BM,
+Tensor gB = local_tile(mB, cta_tiler, cta_coord, Step&lt; X,_1,_1&gt;{});  // B 只取 N、K → (BN,
+Tensor gC = local_tile(mC, cta_tiler, cta_coord, Step&lt;_1,_1, X&gt;{});  // C 只取 M、N → (BM,
+</code></pre>
+<p>切法由输出定，tile 多大要把输入代价也算进来</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>约束</th>
+<th>从哪里反推</th>
+<th>对输出 tile 的要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复用</td>
+<td>每走一步 K 搬 (BM+BN)·BK 个输入，做 BM·BN·BK 次乘加 → 强度 ≈ BM·BN/(BM+BN) FLOP/B</td>
+<td>越大越好</td>
+</tr>
+<tr>
+<td>SMEM</td>
+<td>每级 stage 放 (BM+BN)·BK·2 B 的输入，5090 每 CTA ≤ 99 KB</td>
+<td>不能太大</td>
+</tr>
+<tr>
+<td>寄存器</td>
+<td>累加器共 BM·BN 个，分给 CTA 的所有线程</td>
+<td>不能太大</td>
+</tr>
+<tr>
+<td>SM 利用率</td>
+<td>tile 数 = CTA 数，要和 170 个 SM 对得上</td>
+<td>不能太大（小问题尤其明显，见<a href="../knowledge/e2e.html">端到端例子</a>：1024×256 按 128×128 只有 16 个 tile）</td>
+</tr>
+</tbody>
+</table></div>
+<p>什么时候不只切输出：输出 tile 太少、K 又长时，用 split-K 或 Stream-K 把 K 也分给多个 CTA，代价是多一步部分和归约——这时就不再是纯粹的 output-stationary。</p>
+<h2 id="k-sizing-2">先分清四种“数量”</h2>
+<p>讨论“CTA 数量”时，常常把四个不同的数混在一起：</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>名字</th>
+<th>含义</th>
+<th>由谁决定</th>
+<th>8192³ · 128×128 tile 的例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>tile 数</td>
+<td>输出 C 被切成多少块（逻辑工作量）</td>
+<td><code>ceil(M/BM) · ceil(N/BN)</code> （split-K 再乘 S）</td>
+<td>64 × 64 = 4096</td>
+</tr>
+<tr>
+<td>grid 大小</td>
+<td>launch 了多少个 CTA</td>
+<td>普通 kernel = tile 数；persistent kernel = SM 数 × 每 SM 驻留数</td>
+<td>4096（或 persistent：170）</td>
+</tr>
+<tr>
+<td>每 SM 驻留 CTA 数</td>
+<td>一个 SM 同时能放几个 CTA（占用率）</td>
+<td>线程、寄存器、SMEM、CTA 数四个上限的最小值</td>
+<td>1（SMEM 限制）</td>
+</tr>
+<tr>
+<td>波数（wave）</td>
+<td>全部 tile 要分几批跑完</td>
+<td>tile 数 ÷ (170 × 驻留数)，向上取整</td>
+<td>24.09 → 25 波</td>
+</tr>
+</tbody>
+</table></div>
+<p>你一般不直接“选 CTA 数”：选的是 tile 形状，tile 数和 grid 是推出来的。只有 persistent kernel 才让 grid 大小和 tile 数脱钩（每个 CTA 循环取多个 tile）。</p>
+<h2 id="k-sizing-3">参数分五层：哪些不变，为什么</h2>
+
+<figure class="flow snap"><div class="flow-head">从“焊死的”到“推出来的”</div><img src="../figs/sizing/k_sizing-01.png" alt="从“焊死的”到“推出来的”" loading="lazy" style="width:100%;aspect-ratio:1461/352"></figure>
+<h3 id="k-sizing-3-1">① 硬件固定：一张 5090 永远不变</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>5090 的值</th>
+<th>为什么不变</th>
+<th>它约束什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>warp 宽度</td>
+<td>32 lanes</td>
+<td>每个 SMSP 物理上就是 32 条 lane 一起执行一条指令</td>
+<td>线程数按 32 取整；所有 TV layout 的 T 维</td>
+</tr>
+<tr>
+<td>SM 数</td>
+<td>170</td>
+<td>芯片上启用了 170 个 SM</td>
+<td>一波能放多少 CTA → 波数</td>
+</tr>
+<tr>
+<td>每 SM 的 SMSP</td>
+<td>4</td>
+<td>每个 SM 有 4 套调度器 + Tensor Core</td>
+<td>每 CTA warp 数取 4 的倍数，否则有 Tensor Core 闲着</td>
+</tr>
+<tr>
+<td>寄存器</td>
+<td>65536 × 32 bit / SM，≤255 / 线程</td>
+<td>寄存器堆的物理大小；指令编码里寄存器号只有 8 位</td>
+<td>累加器大小 → tile 上限</td>
+</tr>
+<tr>
+<td>SMEM</td>
+<td>≤100 KB / SM，≤99 KB/ CTA</td>
+<td>L1 和 SMEM 共用 128 KB SRAM</td>
+<td>stage 数 × 每级字节</td>
+</tr>
+<tr>
+<td>线程上限</td>
+<td>1024 / CTA，1536 /SM，32 CTA / SM</td>
+<td>调度器的硬件槽位</td>
+<td>占用率</td>
+</tr>
+<tr>
+<td>bank</td>
+<td>32 个 × 4 B</td>
+<td>SMEM 的物理分组</td>
+<td>swizzle、wavefront</td>
+</tr>
+<tr>
+<td>sector / 向量宽度</td>
+<td>32 B sector，单线程最多 16 B</td>
+<td>L2 / LSU 的访问粒度</td>
+<td>copy 的线程布局和向量宽度</td>
+</tr>
+<tr>
+<td>带宽 / 算力</td>
+<td>1792 GB/s，BF16 512 FLOP/clk/SM</td>
+<td>显存位宽 × 频率；Tensor Core 数量</td>
+<td>机器平衡 117 FLOP/B</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="k-sizing-3-2">② 指令固定：选了一种 MMA / copy 指令就不变</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>值</th>
+<th>为什么不变</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MMA atom 形状</td>
+<td>BF16/FP16：<code>m16n8k16</code> ；FP8：<code>m16n8k32</code> ；FP4 block-scaled：<code>m16n8k64</code></td>
+<td>PTX 指令定义的形状，硬件只认这些</td>
+</tr>
+<tr>
+<td>atom 的 TV layout</td>
+<td>每线程 A 4 × b32、B 2 × b32、C 4 × f32（<code>m16n8k16</code> ）</td>
+<td>PTX 规定了哪个 lane 的哪个寄存器放哪个元素（A4）</td>
+</tr>
+<tr>
+<td><code>ldmatrix</code> 形状</td>
+<td>8×8 b16 矩阵，x1 / x2 / x4</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>TMA box</td>
+<td>每维 ≤256 元素，内层 16 B 的倍数；swizzle 32 /64 / 128 B</td>
+<td>TMA 描述符的格式（D1）</td>
+</tr>
+</tbody>
+</table></div>
+<p>这两层的后果是：tile 的每一维必须是 atom 形状的整数倍（BM 是 16 的倍数、BN 是 8 的倍数、BK 是 16 的倍数），而且 BK 最好让一行正好是一个 swizzle 宽度：BF16 时 <code>BK · 2 B = 128 B → BK = 64</code> 。</p>
+<h3 id="k-sizing-3-3">③ 问题给定：M、N、K、数据类型、存储顺序</h3>
+<p>调用者决定。它们通常是运行期的值（同一个 kernel 要服务各种形状），所以 CuTe 里 GMEM 的 layout 是动态的，而 tile 内部的 layout 是静态的。</p>
+<h3 id="k-sizing-3-4">④ 你选的（CTA 设计，编译期常量）</h3>
+<p>只有这几个是真正的旋钮：<code>BM × BN × BK</code> 、warp 排列 <code>WM × WN</code> （决定 warp 数）、stage 数、schedule（cooperative /ping-pong）、swizzle 模式、是否 persistent / split-K / Stream-K。</p>
+<h3 id="k-sizing-3-5">⑤ 推出来的：全部有算式</h3>
+<pre><code>tile 数        = ceil(M / BM) · ceil(N / BN)                     (· S，split-K)
+线程数 / CTA   = 32 · warps = 32 · WM · WN
+warp tile      = (BM / WM) × (BN / WN)
+累加器寄存器   = BM · BN / threads              （FP32，每元素 1 个寄存器）
+每线程寄存器   ≈ 累加器 + A/B fragment + 地址等 ≈ 累加器 + 30~60
+SMEM / CTA     = stages · (BM + BN) · BK · elem_bytes  (+ epilogue + barrier)
+驻留 CTA / SM  = min( 1536 / threads,
+                     65536 / (ceil8(regs) · threads),
+                     100 KB / SMEM_CTA,
+                     32 )
+波数           = ceil( tile 数 / (170 · 驻留数) )
+波效率         = tile 数 / (波数 · 170 · 驻留数)
+tile 强度      = 2·BM·BN·BK / ((BM+BN)·BK·elem_bytes)  = BM·BN/(BM+BN)  FLOP/B（BF16）
+</code></pre>
+<h2 id="k-sizing-4">决定的顺序：一步一步定下来</h2>
+<p>下面是 8192³ 一个形状的简版。完整的 9 步流程、split-K / Stream-K 的取舍和 6 个不同形状的例子，见专门的一章 <a href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置</a>。</p>
+
+<figure class="flow snap"><div class="flow-head">▶ 在 5090 上给 8192³ BF16 GEMM（FP32 累加）定配置</div><img src="../figs/sizing/k_sizing-02.png" alt="▶ 在 5090 上给 8192³ BF16 GEMM（FP32 累加）定配置" loading="lazy" style="width:100%;aspect-ratio:1461/1870"></figure>
+<h2 id="k-sizing-5">同一套规则，换个形状结果就变</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>配置</th>
+<th>tile 数</th>
+<th>波数（1 CTA/SM）</th>
+<th>波效率</th>
+<th>结论</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8192³</td>
+<td>128×128</td>
+<td>4096</td>
+<td>24.09 → 25</td>
+<td>96.4%</td>
+<td>好</td>
+</tr>
+<tr>
+<td>4096³</td>
+<td>128×128</td>
+<td>1024</td>
+<td>6.02 → 7</td>
+<td>86.0%</td>
+<td>最后一波只有 4 个 tile</td>
+</tr>
+<tr>
+<td>4096³</td>
+<td>128×256</td>
+<td>512</td>
+<td>3.01 → 4</td>
+<td>75.3%</td>
+<td>tile 越大，量化损失越大</td>
+</tr>
+<tr>
+<td>4096³</td>
+<td>128×64</td>
+<td>2048</td>
+<td>12.05 → 13</td>
+<td>92.7%</td>
+<td>波效率好，但强度降到 43</td>
+</tr>
+<tr>
+<td>4096³</td>
+<td>128×128 + Stream-K</td>
+<td>1024</td>
+<td>均分 K</td>
+<td>≈100%</td>
+<td>把余下的 tile 沿 K 切给所有 SM</td>
+</tr>
+<tr>
+<td>1024 × 1024 × 8192</td>
+<td>128×128</td>
+<td>64</td>
+<td>0.38 → 1</td>
+<td>37.6%</td>
+<td>tile 太少：用 split-K（S=2 → 128 个 CTA，S=4 → 256）</td>
+</tr>
+<tr>
+<td>64³（Track A）</td>
+<td>32×32</td>
+<td>4</td>
+<td>1</td>
+<td>2.4%</td>
+<td>只为能手算；时间由启动开销决定</td>
+</tr>
+</tbody>
+</table></div>
+
+<div class="callout key"><div class="callout-title">要点 · 三条经验</div><ol>
+<li>tile 数 ≥ 几倍的 170，波效率才稳；不够就 split-K / Stream-K，或者换小 tile。2. 5090 上 SMEM（99 KB）比寄存器先用完：先算 stage 字节，再定 tile；从 H100（227 KB）搬来的配置几乎</li>
+</ol>
+<p>都要缩。</p>
+<ol start="3">
+<li>warp 数 = 4 的倍数，每线程累加器 ≤ ~128：再多就要压寄存器或掉占用率，ptxas 一旦报 spill 就退回小一号。</li>
+</ol>
+</div>
+<h2 id="k-sizing-6">和本套练习、H100 的对照</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>Track A 的手算例子</th>
+<th>5090 实战（BF16）</th>
+<th>H100（E2 的模型）</th>
+<th>为什么不同</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CTA tile</td>
+<td>32×32×16</td>
+<td>128×128×64</td>
+<td>128×128×64 /128×256×64</td>
+<td>H100 SMEM 大 2.3 倍，放得下更大的 tile</td>
+</tr>
+<tr>
+<td>warp /CTA</td>
+<td>4（一 SMSP 一个）</td>
+<td>8（2×4）</td>
+<td>3 个 warp group = 12 warp（1 producer + 2 consumer）</td>
+<td>Hopper 的 WGMMA 以 128 线程的 warp group 为单位</td>
+</tr>
+<tr>
+<td>MMA</td>
+<td>2×2 个 <code>m16n8k16</code> atom</td>
+<td>每 warp 4×4 个 atom</td>
+<td>WGMMA <code>m64nNk16</code></td>
+<td>5090 没有 WGMMA</td>
+</tr>
+<tr>
+<td>stage</td>
+<td>1（无流水线）</td>
+<td>2–3</td>
+<td>4–7</td>
+<td>stage × 每级字节 ≤SMEM</td>
+</tr>
+<tr>
+<td>寄存器分配</td>
+<td>—</td>
+<td>所有 warp 同一上限（<code>__launch_bounds__</code> ）</td>
+<td>producer 40 / consumer 232（<code>setmaxnreg</code> ）</td>
+<td>5090 没有 <code>setmaxnreg</code> （D3）</td>
+</tr>
+<tr>
+<td>SM 数</td>
+<td>—</td>
+<td>170</td>
+<td>132</td>
+<td>影响波数</td>
+</tr>
+</tbody>
+</table></div>
+<p>做 E2 时可以自己构造一个 5090 的 <code>GPU(sms=170, smem_per_cta=101376, regs_per_sm=65536, hbm_bytes_per_us=1.792e6, tensor_flops_per_us=209.5e6, ...)</code> 跑一遍搜索，体会 SMEM 变小以后排名怎样变；但注意 E2 的寄存器模型假设了 Hopper 的 <code>setmaxnreg</code> （40 / 232），在 5090 上并不成立，只能当量级参考。</p>
+
+<div class="callout analogy"><div class="callout-title">类比 · 用工厂的话说</div><p>订单（M×N 的输出）先按“一个小组能干完的一块”切成 tile——小组的大小受工作台（SMEM 99 KB）和工具台（寄存器）限制；每个小组配 8 个班组，正好每条产线 2 个；170 个车间一批能接 170 单，余下的订单排到下一批。最后一批只剩 16 单时，154 个车间干等——这就是 wave quantization，Stream-K 的做法是把这 16 单拆细，分给所有车间一起干。</p>
+</div>
+<p>下一页 <a href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256]</a> 用一个“小 GEMM”把这些规则完整走一遍：比较 7 种 tile / split-K 方案，写出五个映射的具体坐标，并按时间顺序走一遍 kernel。</p>
+
+
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#k-sizing-1">Tiling 从输出出发，输入是倒推出来的</a>
+<a class="o2" href="#k-sizing-2">先分清四种“数量”</a>
+<a class="o2" href="#k-sizing-3">参数分五层：哪些不变，为什么</a>
+<a class="o3" href="#k-sizing-3-1">① 硬件固定：一张 5090 永远不变</a>
+<a class="o3" href="#k-sizing-3-2">② 指令固定：选了一种 MMA / copy 指令就不变</a>
+<a class="o3" href="#k-sizing-3-3">③ 问题给定：M、N、K、数据类型、存储顺序</a>
+<a class="o3" href="#k-sizing-3-4">④ 你选的（CTA 设计，编译期常量）</a>
+<a class="o3" href="#k-sizing-3-5">⑤ 推出来的：全部有算式</a>
+<a class="o2" href="#k-sizing-4">决定的顺序：一步一步定下来</a>
+<a class="o2" href="#k-sizing-5">同一套规则，换个形状结果就变</a>
+<a class="o2" href="#k-sizing-6">和本套练习、H100 的对照</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

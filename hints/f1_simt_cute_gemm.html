@@ -1,0 +1,877 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F1 · 第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3 cur" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
+<main>
+<header class="cover"><div class="kicker">F1 · Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090） · 60 分钟 · 中</div><h1>F1 · 第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core 算</h1><p class="lede">Track F 的第一题：写一个真正在 GPU 上跑的 CuTe kernel。先不碰 Tensor Core，用<code>make_tensor</code> 、<code>local_tile</code> 、<code>local_partition</code> 、<code>copy</code> 、<code>gemm</code> 这五个最基本的 API 写一个SIMT（FFMA）的 tiled GEMM，在 RTX 5090 上对拍、计时。主机部分把 kernel 里每次 partition的结果先用整数算出来，并和真实 CuTe 对拍——没有 GPU 也能确认自己理解对了。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/f1_simt_cute_gemm.py"><code>mine/f1_simt_cute_gemm.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_f1_simt_cute_gemm.py"><code>tests/test_f1_simt_cute_gemm.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/f1_simt_cute_gemm.py"><code>solutions/f1_simt_cute_gemm.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="F1"> 我已完成这道题</label></header>
+<h2 id="f1-1">题面速览</h2>
+<ul>
+<li>背景知识：<a href="../knowledge/from_scratch.html">从零设计 Tiled GEMM</a> 的 ① CTA tile 和 ② 线程分工；<a href="../knowledge/execution.html">执行模型</a>（线程按 warp 执行、SMEM 按 CTA 分配）。</li>
+<li>在体系里的位置：结构照着 CUTLASS 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_1.cu#L44-L246">sgemm_1.cu</a> （<code>gemm_device</code> ）和它的 TN 配置 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_1.cu#L300-L350">gemm_tn</a> 。区别：输入是 BF16（搬进 SMEM 时转成 float），C 是行主序 FP32。</li>
+<li>你要写两个文件：</li>
+</ul>
+<ol>
+<li><code>mine/f1_simt_cute_gemm.cu</code> ：把三个 <code>DRILL_TODO</code> 换成代码——① <code>local_tile</code> 切出 gA / gB / gC；②<code>local_partition</code> 分出搬运分工和计算分工，建累加器；③ K 循环和写回。</li>
+<li><code>mine/f1_simt_cute_gemm.py</code> ：<code>cta_grid</code> 、<code>copy_coords</code> 、<code>c_coords</code> 、<code>a_rows</code> 、<code>b_rows</code> 和三个计数函数。</li>
+</ol>
+<ul>
+<li>关键规则（.py 的 docstring 有完整版）：</li>
+</ul>
+<ol>
+<li>CTA tile (128, 128, 8)，256 线程；A、B 都按 K 连续，C 按 N 连续。</li>
+<li>搬运布局 <code>(32,8):(8,1)</code> ：线程 t 拿 <code>(t // 8 + 32·i, t % 8)</code> ，i = 0..3。</li>
+<li>计算布局 <code>(16,16):(1,16)</code> ：线程 t 累加 <code>(t % 16 + 16·a, t // 16 + 16·b)</code> ，a、b = 0..7，列主序。</li>
+</ol>
+<p>测试检查：五个线程的 <code>local_partition</code> 结果和真实 CuTe 完全一致 · 每个元素恰好被一个线程搬、被一个线程累加 · 计数公式 · <code>.cu</code> 在没有 GPU 时通过 clang 的 CUDA 类型检查 · 有 GPU 时两个形状对拍通过。</p>
+<h2 id="f1-2">上机准备（Track F 全部题目通用）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>在哪台机器</th>
+<th>能跑什么</th>
+<th>怎么跑</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>没有 GPU 的机器（例如这台 Mac）</td>
+<td>主机部分的全部测试；<code>.cu</code> 的类型检查：用 clang 的 CUDA 前端做 <code>-fsyntax- only</code> ，完整实例化 CuTe 模板、检查所有 <code>static_assert</code> ，但不生成机器码</td>
+<td><code>./check.sh f1</code> （GPU 测试会显示 skipped）</td>
+</tr>
+<tr>
+<td>你的 RTX 5090 机器</td>
+<td>上面全部，再加 nvcc 编译、对拍、计时</td>
+<td>装 CUDA ≥ 12.8；<code>tools/fetch_headers.sh</code> 取固定版本的 CUTLASS；<code>./check.sh f1 -s</code> （<code>-s</code> 让 pytest 打印每次运行的 JSON）</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>单独编译、运行一个文件：<code>python3 tools/cu_drill.py run mine/f1_simt_cute_gemm.cu 2048 2048 2048</code> ；只做类型检查：<code>python3 tools/cu_drill.py check mine/f1_simt_cute_gemm.cu</code> 。</li>
+<li>默认 <code>-arch=sm_120</code> （RTX 5090）。别的卡用 <code>CUTE_DRILL_ARCH=sm_86 ./check.sh f1</code> 之类；F1–F5 只用到 sm_80 的指令（cp.async、ldmatrix、mma.sync），Ampere 以后的卡都能跑。</li>
+<li>每个程序最后打印一行 JSON：<code>ok</code> （误差 ≤ 容差）、<code>max_rel_err</code> 、<code>ms</code> 、<code>tflops</code> 。参考结果由 <code>gpu/common.cuh</code> 里一个“一个线程算一个输出”的朴素 kernel 给出。</li>
+<li><code>mine/*.cu</code> 里没写的地方是 <code>DRILL_TODO(&quot;…&quot;)</code> ：一个必然失败的 <code>static_assert</code> ，所以没写完时编译器会把每个 TODO 的说明都列出来。</li>
+</ul>
+<h2 id="f1-3">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 先用最普通的工人把流水线跑通</div><p>Tensor Core 是专用冲压机，CUDA core 是普通机床。F1 只用普通机床，但车间的组织方式已经是最终的样子：订单（C）按 128×128 切给小组（CTA）；每轮从仓库搬一小箱料（A、B 各 128×8）上工作台（SMEM），搬的时候 256 个工人按“搬运表”（<code>ThrA</code> ）分工；然后每个工人按“加工表”（<code>ThrC</code> ）从工作台取料，在自己的工具台（寄存器）上累加 8×8 = 64 个零件。后面四题只是把机床换成冲压机、把一次一箱换成流水线。</p>
+</div>
+<h2 id="f1-4">图解：一个 k-tile 里数据怎么走</h2>
+
+<figure class="flow"><div class="flow-head">F1 的一个 k-tile（BK = 8）<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;F1 的一个 k-tile（BK = 8）&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;g&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;全局 A, B&quot;, &quot;s&quot;: &quot;local_tile → (128,8)&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cp&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;搬运分工&quot;, &quot;s&quot;: &quot;ThrA (32,8)&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;SMEM (float)&quot;, &quot;s&quot;: &quot;BF16 → float&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;th&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;计算分工&quot;, &quot;s&quot;: &quot;ThrC (16,16)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;累加器 8×8&quot;, &quot;s&quot;: &quot;64 个 float&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;全局 C&quot;, &quot;s&quot;: &quot;K 走完才写&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;g&quot;, &quot;b&quot;: &quot;cp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cp&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;th&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;th&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;FFMA&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;acc&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 86.0, &quot;nw&quot;: 165.0}}"></div><figcaption>两个 <code>__syncthreads()</code> 分别保证“大家都搬完了才开始算”和“大家都算完了才开始覆盖 SMEM”。</figcaption></figure>
+<h2 id="f1-5">逐步演示：kernel 的三段 TODO</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 从全局张量到写回</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;t&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;全局张量&quot;, &quot;s&quot;: &quot;make_tensor&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;lt&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;① CTA tile&quot;, &quot;s&quot;: &quot;local_tile&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;lp&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;② 分工&quot;, &quot;s&quot;: &quot;local_partition&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kl&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;③ K 循环&quot;, &quot;s&quot;: &quot;copy / gemm&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;wb&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;写回&quot;, &quot;s&quot;: &quot;copy(tCrC, tCgC)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;t&quot;, &quot;b&quot;: &quot;lt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;lt&quot;, &quot;b&quot;: &quot;lp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;lp&quot;, &quot;b&quot;: &quot;kl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kl&quot;, &quot;b&quot;: &quot;wb&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 170.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 145.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="t"><div class="step-title">1. 全局张量：只是指针加 layout</div><p><code>make_tensor(make_gmem_ptr(A), make_shape(M, K), make_stride(K, Int&lt;1&gt;{}))</code> 不搬任何数据，它只是说“A 是一个 M×K、K 方向 stride 为 1 的张量”。动态的 M、N、K 和静态的 <code>Int&lt;1&gt;</code> 可以混用：静态的部分在编译期就被折叠掉（Track C）。</p>
+</div><div class="step" data-hl="lt"><div class="step-title">2. ① local_tile：这个 CTA 看哪一块</div><p><code>local_tile(mA, make_shape(BM, BN, BK), make_coord(blockIdx.x, blockIdx.y, _), Step&lt;_1, X, _1&gt;{})</code>。<code>Step&lt;_1, X, _1&gt;</code> 说“A 只用 tiler 的 M、K 两维”；坐标里的 <code>_</code> 说“K 方向不固定，保留成最后一维”。结果 gA 的形状是 (128, 8, K/8)：第三维就是 k-tile 编号。</p>
+</div><div class="step" data-hl="lp"><div class="step-title">3. ② local_partition：每个线程拿哪几个</div><p><code>local_partition(gA, ThrA{}, threadIdx.x)</code> 把 (128,8) 按 ThrA 的形状 (32,8) 切块，线程 t 在每一块里拿 ThrA⁻¹(t) 那个位置——4 个元素，形状 (4, 1, k)。计算分工用投影：<code>local_partition(sA, ThrC{}, t, Step&lt;_1, X&gt;{})</code> 只按 ThrC 的“行”去分 sA，所以线程 t 拿到 8 整行（8 × BK）。</p>
+</div><div class="step" data-hl="kl"><div class="step-title">4. ③ K 循环：搬、等、算、等</div><p><code>copy(tAgA(_, _, kt), tAsA)</code> 逐元素搬（BF16 → float 的转换就发生在这里），<code>__syncthreads()</code>，<code>gemm(tCsA, tCsB, tCrC)</code> 做 (8,8) += (8,8)·(8,8)ᵀ 的外积累加，全是 FFMA，再 <code>__syncthreads()</code>。</p>
+</div><div class="step" data-hl="wb"><div class="step-title">5. 写回</div><p><code>copy(tCrC, tCgC)</code>：每个线程把自己的 64 个累加器写到 C 的 64 个位置。它们按 16 的步长散开，所以每个 warp 的一条 store 写的是 32 个不连续的 float——这是 F1 慢的原因之一。</p>
+</div></div></div>
+<h2 id="f1-6">从小例子开始：先在草稿纸上手算</h2>
+<p>只看一个线程：t = 37。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>怎么算</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>在 ThrA 里的坐标</td>
+<td>(37 // 8, 37 % 8)</td>
+<td>(4, 5)</td>
+</tr>
+<tr>
+<td>搬 A tile 的哪 4 个元素</td>
+<td>(4 + 32i, 5)</td>
+<td>(4,5) (36,5) (68,5) (100,5)</td>
+</tr>
+<tr>
+<td>在 ThrC 里的坐标</td>
+<td>(37 % 16, 37 // 16)</td>
+<td>(5, 2)</td>
+</tr>
+<tr>
+<td>累加 C tile 的哪些元素</td>
+<td>(5 + 16a, 2 + 16b)</td>
+<td>(5,2) (21,2) … (117,2)，(5,18) … 共 64 个</td>
+</tr>
+<tr>
+<td>计算时读 sA 的哪几行</td>
+<td>5 + 16a</td>
+<td>5, 21, 37, …, 117</td>
+</tr>
+</tbody>
+</table></div>
+<p>再算一个 CTA 的量：每个 k-tile 搬 (128 + 128) × 8 × 2 B = 4 KB，做 2 × 128 × 128 × 8 = 262144 FLOP，强度 64 FLOP/B（和 Tensor Core 版的 128×128 tile 一样——强度只看 BM、BN，见 <a href="../knowledge/tile_dims.html">BM、BN、BK 各管什么</a>）。</p>
+<h2 id="f1-7">上机验证</h2>
+<pre><code>./check.sh f1 -s                                         # 在 5090 上：主机部分 + 类型检查 + nvcc 编译、对拍、计时
+python3 tools/cu_drill.py run mine/f1_simt_cute_gemm.cu 4096 4096 4096
+</code></pre>
+<p>期望：<code>ok: true</code> 。<code>max_rel_err</code> 在这里通常正好是 0：<code>gpu/common.cuh</code> 把输入取在 1/64 的网格上，乘积和部分和在 FP32 里都是精确的，所以累加顺序不同也不会产生舍入差；换成随机输入时会在 1e-6 量级。速度只有 FP32 峰值（约 105 TFLOPS）的一小部分——每次 FFMA 要从 SMEM 读 0.25 个 float，每个 k-tile 两次 <code>__syncthreads()</code> ，还没有任何流水线。记下这个数，F2、F3 之后对比。</p>
+<h2 id="f1-8">提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>先让 shape 对上<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><p>在 kernel 开头加 <code>if (thread0()) { print(gA); print(&quot;\n&quot;); print(tAgA); print(&quot;\n&quot;); }</code> （CuTe 的 <code>print</code> 在设备上也能用），先看形状：gA 应该是 <code>(_128,_8,K/8)</code> ，tAgA 是 <code>(_4,_1,K/8)</code> ，tCsA 是 <code>(_8,_8)</code> ，tCrC 是 <code>(_8,_8)</code> 。主机部分的 <code>copy_coords</code> / <code>c_coords</code> 就是这些张量里每个元素的坐标。</p>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><p>① 三次 <code>local_tile</code> ，只差 <code>Step</code> ：A 是 <code>Step&lt;_1, X, _1&gt;</code> ，B 是 <code>Step&lt;X, _1, _1&gt;</code> ，C 是 <code>Step&lt;_1, _1, X&gt;</code> 。② 搬运用 <code>local_partition(g, Thr, threadIdx.x)</code> ；计算用带投影的版本：sA 按 ThrC 的行（<code>Step&lt;_1, X&gt;</code> ）、sB 按列（<code>Step&lt;X, _1&gt;</code> ）、gC 两维都用（<code>Step&lt;_1, _1&gt;</code> ）；累加器 <code>make_tensor_like(tCgC)</code> 后 <code>clear</code> 。③ 循环次数是 <code>size&lt;2&gt;(tAgA)</code> 。</p>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><p>为什么需要两个 __syncthreads？</p>
+<p>第一个：所有线程的 copy 都写进 SMEM 之后才能开始算（别的线程搬的数据你也要用）。第二个：所有线程都算完之后，下一轮才能覆盖 SMEM。去掉第二个，快的 warp 会在慢的 warp 还在读 sA 时把它覆盖掉——结果偶尔错、而且和运行次数有关，是最难查的那一类 bug。</p>
+</div></details>
+<h2 id="f1-9">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/f1_simt_cute_gemm.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/f1_simt_cute_gemm.py</span><span class="muted small">86 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;F1 · 第一个真实的 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core 算 — reference solution.
+
+这一题有两部分：
+1. **GPU 部分**（`f1_simt_cute_gemm.cu`）：用真实 CuTe 写一个 SIMT（FFMA）的 tiled GEMM，在 RTX 5090 上跑通、对拍、计时。
+2. **主机部分**（本文件）：把 kernel 里每个 `local_partition` 的结果先用整数算出来——哪个线程搬哪几个元素、
+   哪个线程累加哪 64 个输出——并和真实 CuTe 的输出（oracle/f1_simt_cute_gemm.cpp → tests/golden）对拍。
+   这样在没有 GPU 的机器上也能确认自己对 kernel 的理解是对的。
+
+配置（和 .cu 一致，对照 CUTLASS examples/cute/tutorial/sgemm_1.cu）
+- A: M×K、B: N×K（都按 K 连续），C: M×N（按 N 连续），C = A·Bᵀ。
+- CTA tile (BM, BN, BK) = (128, 128, 8)，256 线程。
+- 搬运：ThrA = ThrB = (32,8):(8,1)——线程 t 在线程布局里的坐标是 (t // 8, t % 8)。
+  local_partition(tile, ThrA, t) 把 (128,8) 的 tile 按 (32,8) 切，线程 t 拿每一块里的同一个位置：
+  (t // 8 + 32·i, t % 8)，i = 0..3（按 i 的顺序）。
+- 计算：ThrC = (16,16):(1,16)——线程 t 的坐标是 (t % 16, t // 16)。
+  线程 t 累加 C tile 的 (t % 16 + 16·a, t // 16 + 16·b)，a, b = 0..7；顺序是 a 先变（列主序，index = a + 8·b）。
+  它读 sA 的行 t % 16 + 16·a（Step&lt;_1, X&gt; 只按行投影），读 sB 的行 t // 16 + 16·b。
+
+计数
+- global_bytes(M, N, K)：所有 CTA 从全局内存读的字节数 = CTA 数 × k-tile 数 × (BM + BN)·BK·2。
+  （BF16 每元素 2 字节；不考虑 L2 命中——这是“L2→SM”的流量。）
+- ffma_per_thread(K)：每个线程做的 FFMA 次数 = 8·8·K。
+- smem_loads_per_ffma()：gemm(tCsA, tCsB, tCrC) 每个 k 读 8 个 a + 8 个 b，做 64 次 FFMA → 16/64。
+
+API
+    BM, BN, BK, THREADS                                    given
+    cta_grid(M, N) -&gt; (int, int)                           M、N 不是 128 的倍数时 ValueError
+    copy_coords(t) -&gt; [(m, k), ...]                        长度 4
+    c_coords(t) -&gt; [(m, n), ...]                           长度 64，列主序
+    a_rows(t) -&gt; [m, ...]                                  长度 8：线程 t 计算时读的 sA 行
+    b_rows(t) -&gt; [n, ...]                                  长度 8
+    global_bytes(M, N, K) -&gt; int
+    ffma_per_thread(K) -&gt; int
+    smem_loads_per_ffma() -&gt; float
+&quot;&quot;&quot;
+from __future__ import annotations
+
+BM, BN, BK, THREADS = 128, 128, 8, 256
+
+
+def _check_t(t: int) -&gt; None:
+    if not 0 &lt;= t &lt; THREADS:
+        raise ValueError(f&quot;thread {t} out of range [0, {THREADS})&quot;)
+
+
+def cta_grid(M: int, N: int) -&gt; tuple:
+    if M &lt;= 0 or N &lt;= 0 or M % BM or N % BN:
+        raise ValueError(f&quot;F1 needs M, N to be positive multiples of {BM}, got {M}x{N}&quot;)
+    return M // BM, N // BN
+
+
+def copy_coords(t: int) -&gt; list:
+    _check_t(t)
+    # ThrA (32,8):(8,1) 的逆：t → (t // 8, t % 8)；tile (128,8) 被切成 4 块 (32,8)，沿 M 排
+    return [(t // 8 + 32 * i, t % 8) for i in range(BM // 32)]
+
+
+def c_coords(t: int) -&gt; list:
+    _check_t(t)
+    # ThrC (16,16):(1,16) 的逆：t → (t % 16, t // 16)；(128,128) 被切成 8×8 块，列主序遍历
+    return [(t % 16 + 16 * a, t // 16 + 16 * b) for b in range(8) for a in range(8)]
+
+
+def a_rows(t: int) -&gt; list:
+    _check_t(t)
+    return [t % 16 + 16 * a for a in range(8)]
+
+
+def b_rows(t: int) -&gt; list:
+    _check_t(t)
+    return [t // 16 + 16 * b for b in range(8)]
+
+
+def global_bytes(M: int, N: int, K: int) -&gt; int:
+    gm, gn = cta_grid(M, N)
+    if K &lt;= 0 or K % BK:
+        raise ValueError(f&quot;K must be a positive multiple of {BK}&quot;)
+    return gm * gn * (K // BK) * (BM + BN) * BK * 2
+
+
+def ffma_per_thread(K: int) -&gt; int:
+    return 8 * 8 * K
+
+
+def smem_loads_per_ffma() -&gt; float:
+    return (8 + 8) / (8 * 8)</code></pre></div></div></details>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/f1_simt_cute_gemm.cu<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/f1_simt_cute_gemm.cu</span><span class="muted small">118 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-cpp">// F1 · 第一个真实的 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 — reference solution.
+//
+// 目的是先熟悉“CuTe 张量”在 GPU 上怎么用，还不碰 Tensor Core：
+//   make_tensor(make_gmem_ptr(p), shape, stride)  全局张量（只是指针 + layout，不搬数据）
+//   local_tile(mA, tiler, coord, Step&lt;...&gt;)       这个 CTA 的那一块（A1）
+//   local_partition(tile, thr_layout, tid)        按线程布局把一块分给各个线程（A2 的“谁搬哪个”）
+//   copy(src, dst) / gemm(a, b, c)                逐元素搬运 / 逐元素乘加（UniversalFMA）
+// 结构对照 CUTLASS examples/cute/tutorial/sgemm_1.cu（gemm_device L44–L246，gemm_tn L300–L350），区别：
+//   BF16 输入（读进 SMEM 时转成 float）、C 是行主序 FP32。
+//
+// 配置：CTA tile 128×128×8，256 线程。
+//   搬运：tA = tB = (32,8) 行主序（相邻 8 个线程读同一行的 8 个 K 元素）
+//   计算：tC = (16,16) 列主序，每线程负责 8×8 = 64 个输出，按 16 的步长散开（raked）
+// 前提：M % 128 == 0、N % 128 == 0、K % 8 == 0。
+//
+// 运行：python3 tools/cu_drill.py run solutions/f1_simt_cute_gemm.cu 2048 2048 2048
+#include &lt;cute/tensor.hpp&gt;
+
+#include &quot;common.cuh&quot;
+
+using namespace cute;
+
+namespace f1 {
+
+using TA = cute::bfloat16_t;
+using TB = cute::bfloat16_t;
+using TC = float;
+
+using BM = Int&lt;128&gt;;
+using BN = Int&lt;128&gt;;
+using BK = Int&lt;8&gt;;
+using ThrA = Layout&lt;Shape&lt;_32, _8&gt;, Stride&lt;_8, _1&gt;&gt;;     // (m,k) → 线程号，k 连续
+using ThrB = Layout&lt;Shape&lt;_32, _8&gt;, Stride&lt;_8, _1&gt;&gt;;     // (n,k) → 线程号
+using ThrC = Layout&lt;Shape&lt;_16, _16&gt;, Stride&lt;_1, _16&gt;&gt;;   // (m,n) → 线程号，m 连续
+using SmemA = Layout&lt;Shape&lt;BM, BK&gt;, Stride&lt;BK, _1&gt;&gt;;     // (m,k) → SMEM 下标，k 连续
+using SmemB = Layout&lt;Shape&lt;BN, BK&gt;, Stride&lt;BK, _1&gt;&gt;;
+constexpr int kThreads = 256;
+
+__global__ __launch_bounds__(kThreads) void gemm_kernel(int M, int N, int K, TA const* A, TB const* B, TC* C) {
+  // 全局张量
+  Tensor mA = make_tensor(make_gmem_ptr(A), make_shape(M, K), make_stride(K, Int&lt;1&gt;{}));   // (M,K)
+  Tensor mB = make_tensor(make_gmem_ptr(B), make_shape(N, K), make_stride(K, Int&lt;1&gt;{}));   // (N,K)
+  Tensor mC = make_tensor(make_gmem_ptr(C), make_shape(M, N), make_stride(N, Int&lt;1&gt;{}));   // (M,N)
+
+  // 这个 CTA 的 tile
+  // [TODO ①] 用 local_tile 切出这个 CTA 的 gA (BM,BK,k)、gB (BN,BK,k)、gC (BM,BN)
+  auto cta_tiler = make_shape(BM{}, BN{}, BK{});
+  auto cta_coord = make_coord(blockIdx.x, blockIdx.y, _);
+  Tensor gA = local_tile(mA, cta_tiler, cta_coord, Step&lt;_1, X, _1&gt;{});   // (BM,BK,k)
+  Tensor gB = local_tile(mB, cta_tiler, cta_coord, Step&lt;X, _1, _1&gt;{});   // (BN,BK,k)
+  Tensor gC = local_tile(mC, cta_tiler, cta_coord, Step&lt;_1, _1, X&gt;{});   // (BM,BN)
+  // [/TODO]
+
+  // SMEM 存 float：BF16 在搬进来时转换一次，后面的 FFMA 就不用每次再转
+  __shared__ float smemA[cosize_v&lt;SmemA&gt;];
+  __shared__ float smemB[cosize_v&lt;SmemB&gt;];
+  Tensor sA = make_tensor(make_smem_ptr(smemA), SmemA{});   // (BM,BK)
+  Tensor sB = make_tensor(make_smem_ptr(smemB), SmemB{});   // (BN,BK)
+
+  // 搬运分工：线程 t 负责 tile 里 (t/8 + 32i, t%8) 这几个元素
+  // [TODO ②] 用 local_partition 分出搬运分工 tAgA/tAsA/tBgB/tBsB、计算分工 tCsA/tCsB/tCgC，建寄存器累加器 tCrC 并清零
+  Tensor tAgA = local_partition(gA, ThrA{}, threadIdx.x);   // (4,1,k)
+  Tensor tAsA = local_partition(sA, ThrA{}, threadIdx.x);   // (4,1)
+  Tensor tBgB = local_partition(gB, ThrB{}, threadIdx.x);
+  Tensor tBsB = local_partition(sB, ThrB{}, threadIdx.x);
+
+  // 计算分工：按 tC 的行投影分 sA、按列投影分 sB、整体分 gC
+  Tensor tCsA = local_partition(sA, ThrC{}, threadIdx.x, Step&lt;_1, X&gt;{});    // (8,BK)
+  Tensor tCsB = local_partition(sB, ThrC{}, threadIdx.x, Step&lt;X, _1&gt;{});    // (8,BK)
+  Tensor tCgC = local_partition(gC, ThrC{}, threadIdx.x, Step&lt;_1, _1&gt;{});   // (8,8)
+  Tensor tCrC = make_tensor_like(tCgC);                                       // (8,8) 寄存器累加器
+  clear(tCrC);
+  // [/TODO]
+
+  // [TODO ③] K 循环（copy → __syncthreads → gemm → __syncthreads），最后把累加器写回 gC
+  int k_tiles = size&lt;2&gt;(tAgA);
+  for (int kt = 0; kt &lt; k_tiles; ++kt) {
+    copy(tAgA(_, _, kt), tAsA);   // 逐元素：BF16 → float
+    copy(tBgB(_, _, kt), tBsB);
+    __syncthreads();
+    gemm(tCsA, tCsB, tCrC);       // (8,8) += (8,BK) · (8,BK)ᵀ，全部是 FFMA
+    __syncthreads();
+  }
+  copy(tCrC, tCgC);
+  // [/TODO]
+}
+
+inline void launch(int M, int N, int K, TA const* A, TB const* B, TC* C, cudaStream_t stream = 0) {
+  dim3 grid(M / BM::value, N / BN::value);
+  gemm_kernel&lt;&lt;&lt;grid, kThreads, 0, stream&gt;&gt;&gt;(M, N, K, A, B, C);
+}
+
+}  // namespace f1
+
+int main(int argc, char** argv) {
+  auto a = drill::parse(argc, argv);
+  if (a.M % 128 || a.N % 128 || a.K % 8) {
+    std::printf(&quot;{\&quot;ok\&quot;: false, \&quot;error\&quot;: \&quot;F1 needs M,N %% 128 == 0 and K %% 8 == 0\&quot;}\n&quot;);
+    return 1;
+  }
+  std::vector&lt;__nv_bfloat16&gt; hA(size_t(a.M) * a.K), hB(size_t(a.N) * a.K);
+  drill::fill_bf16(hA, 1);
+  drill::fill_bf16(hB, 2);
+  auto* dA = drill::to_device(hA);
+  auto* dB = drill::to_device(hB);
+  float* dC = nullptr;
+  CUDA_CHECK(cudaMalloc(&amp;dC, size_t(a.M) * a.N * sizeof(float)));
+
+  auto go = [&amp;] { f1::launch(a.M, a.N, a.K, reinterpret_cast&lt;f1::TA const*&gt;(dA), reinterpret_cast&lt;f1::TB const*&gt;(dB), dC); };
+  go();
+  CUDA_CHECK(cudaDeviceSynchronize());
+  std::vector&lt;float&gt; got(size_t(a.M) * a.N);
+  CUDA_CHECK(cudaMemcpy(got.data(), dC, got.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  double err = drill::max_rel_err(got, drill::reference(a.M, a.N, a.K, dA, dB));
+  float ms = drill::time_ms(go, a.iters);
+  drill::report(&quot;f1_simt_128x128x8&quot;, a, err, ms);
+  return 0;
+}</code></pre></div></div></details>
+<h2 id="f1-10">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>把 ThrC 换成 <code>(16,16):(16,1)</code> （行主序）会怎样？<code>c_coords</code> 怎么变？写回时一个 warp 的 32 次 store 落在几个 128 B 的 cache line 上？</li>
+<li>sA 存 float（每个 k-tile 4 KB）和存 BF16（2 KB）各有什么好处？如果存 BF16，<code>gemm</code> 里每次 FFMA 前要多做什么？</li>
+<li><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_2.cu">sgemm_2.cu</a> 把同样的计算改成 <code>TiledMMA&lt;UniversalFMA&gt;</code> + <code>TiledCopy</code> 。对照它，F1 的哪几行会被换掉？这正是 F2 要做的事。</li>
+</ul>
+
+<nav class="pager"><a href="e2_config_search.html">← 上一题 E2</a><a href="f2_tensorcore_gemm.html">F2 下一题 →</a></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#f1-1">题面速览</a>
+<a class="o2" href="#f1-2">上机准备（Track F 全部题目通用）</a>
+<a class="o2" href="#f1-3">直觉与类比</a>
+<a class="o2" href="#f1-4">图解：一个 k-tile 里数据怎么走</a>
+<a class="o2" href="#f1-5">逐步演示：kernel 的三段 TODO</a>
+<a class="o2" href="#f1-6">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#f1-7">上机验证</a>
+<a class="o2" href="#f1-8">提示</a>
+<a class="o2" href="#f1-9">参考解</a>
+<a class="o2" href="#f1-10">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">C1 · Track C · CuTe 编译期在做什么 · 60 分钟 · 难</div><h1>C1 · 编译期化简：常量折叠、强度削减、coalesce 与循环外提</h1><p class="lede">CuTe 的 layout 代数不会在 GPU 上运行：shape 和 stride 是静态整数时，C++ 编译器在实例化模板的那一刻就把整套“TV layout → tile 坐标 → gmem offset”的计算折叠成几条移位、按位与和加法。这道题把运行例子里一个线程的 copy 地址写成表达式树，亲手做常量折叠、强度削减、coalesce 和循环不变量外提，再和真实 clang 编出来的汇编对照。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/c1_static_folding.py"><code>mine/c1_static_folding.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_c1_static_folding.py"><code>tests/test_c1_static_folding.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/c1_static_folding.py"><code>solutions/c1_static_folding.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="C1"> 我已完成这道题</label></header>
 <h2 id="c1-1">题面速览</h2>
@@ -309,7 +321,195 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="c1-3">图解：一个地址表达式经过的 pass</h2>
 
 <figure class="flow"><div class="flow-head">copy 地址的化简流水线<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;copy 地址的化简流水线&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;src&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;copy_offset_expr&quot;, &quot;s&quot;: &quot;TV → tile → gmem&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;fd&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;fold&quot;, &quot;s&quot;: &quot;常量折叠与恒等&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sr&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;strength_reduce&quot;, &quot;s&quot;: &quot;×÷% 2^n → 位运算&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;hs&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;hoist(k)&quot;, &quot;s&quot;: &quot;base + k·16&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;co&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;coalesce_flat&quot;, &quot;s&quot;: &quot;layout 层面合并&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ct&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;count_ops&quot;, &quot;s&quot;: &quot;CSE 后的运行时运算&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;src&quot;, &quot;b&quot;: &quot;fd&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;fd&quot;, &quot;b&quot;: &quot;sr&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sr&quot;, &quot;b&quot;: &quot;hs&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;co&quot;, &quot;b&quot;: &quot;fd&quot;, &quot;t&quot;: &quot;先规范化&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}, {&quot;a&quot;: &quot;sr&quot;, &quot;b&quot;: &quot;ct&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 176.0}}"></div><figcaption>前三个 pass 是“表达式层面”的化简，coalesce 是“layout 层面”的化简：它能看出 <code>(32,16):(1,32)</code> 就是恒等函数，而表达式化简只能得到 <code>(i &amp; 31) + ((i &gt;&gt; 5) &lt;&lt; 5)</code>。CuTe 在组合 layout 时总是先 coalesce（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1033">composition_impl</a> 之前的 <code>coalesce_x</code>），所以很多化简在生成表达式之前就完成了。</figcaption></figure>
-<h2 id="c1-4">逐步演示</h2>
+<h2 id="c1-4">从小例子开始：先在草稿纸上手算</h2>
+<p>运行例子的表达式树有 59 个节点，直接盯着它看很难看出规律。先拿一个小到每个节点、每个格子都能手写出来的例子：一个 4×2 的 tile 放在每行 8 个元素（ld = 8）的行主序矩阵里，第 k 轮 tile 往右挪 2 列。它和运行例子的 <code>offset = m·64 +</code> <code>(k·16 + kk)</code> 是同一个形状，只是数字小。推完之后再放大到测试里的尺寸，最后看一般规则。</p>
+<p>① 小：tile (4,2)，ld = 8，静态</p>
+<p>15 个节点的树，四个 pass 每一步都能手写。</p>
+<pre><code>offset = (i%4)·8 + (k·2 + i//4)·1
+原始  {+:2, *:3, %:1, //:1}  7 个
+fold  {+:2, *:2, %:1, //:1}  6 个
+SR    {+:2, &lt;&lt;:2, &amp;:1, &gt;&gt;:1}  0 个乘除模
+hoist step = 2
+</code></pre>
+<p>② 同一个小例子，动态</p>
+<p>shape、stride 换成运行时的 bm、bk、ld，结构完全一样。</p>
+<pre><code>fold 只能删掉 ·1
+SR    什么也做不了：
+      {+:2, *:2, %:1, //:1}
+hoist step = bk
+</code></pre>
+<p>③ 运行例子：copy_offset_expr(True)</p>
+<p>TV layout ((4,32),(4,1)):((128,1),(32,0))，tile (32,16)，ld = 64。</p>
+<pre><code>原始  59 节点 {+:5, *:7, %:3, //:3}
+fold  41 节点 {+:4, *:4, %:3, //:2}
+SR    41 节点 {+:4, &lt;&lt;:4, &amp;:3, &gt;&gt;:2}
+hoist step = 16，base 11 个运算
+</code></pre>
+<p>④ 一般</p>
+<p>每个 pass 只看局部模式；能不能消掉乘除，只取决于常数是不是 2 的幂、是不是编译期已知。</p>
+<pre><code>fold：c⊕c → 值；x·1, x+0, x//1 → x
+      x·0, x%1 → 0；常量链合并
+SR：  ·2ⁿ → &lt;&lt;n；//2ⁿ → &gt;&gt;n；%2ⁿ → &amp;
+(2ⁿ−1)
+hoist：e = base + k·step
+</code></pre>
+<p><strong>✎</strong> 草稿纸 ①：tile (4,2) 在 ld = 8 的矩阵里，第 k 轮</p>
+<pre><code class="language-text">1) 坐标   idx2crd_expr(i, (4, 2))：前缀积 1 → 4
+          m  = i % 4                 ← 第 0 个模式取模
+          kk = i // 4                ← 最后一个模式只除不模（CuTe 约定）
+2) 地址   layout_expr((8, 1), (m, k·2 + kk))
+          = ((i % 4) * 8) + (((k * 2) + (i // 4)) * 1)
+          树：      +
+                 /     \
+               *         *
+              / \       /  \
+             %   8     +    1        ← 15 个节点
+            / \       /  \
+           i   4     *    //
+                    / \   / \
+                   k   2 i   4
+          count_ops = {+:2, *:3, %:1, //:1}       ← 7 个运行时运算
+3) fold   自底向上：(… ) * 1 → …（x*1 → x），其他节点没有可用的规则
+          = ((i % 4) * 8) + ((k * 2) + (i // 4))   {+:2, *:2, %:1, //:1}
+4) SR     8 = 2³ → &lt;&lt;3；  2 = 2¹ → &lt;&lt;1；  %4 → &amp;3；  //4 → &gt;&gt;2
+          = ((i &amp; 3) &lt;&lt; 3) + ((k &lt;&lt; 1) + (i &gt;&gt; 2))   {+:2, &lt;&lt;:2, &amp;:1, &gt;&gt;:1}
+5) 验算   i = 5, k = 1：5 &amp; 3 = 1 → 1 &lt;&lt; 3 = 8；  1 &lt;&lt; 1 = 2；  5 &gt;&gt; 2 = 1
+          offset = 8 + (2 + 1) = 11            （第 1 行第 3 列：1·8 + 3 = 11 ✓）
+          k = 0：i = 0..7 → [0, 8, 16, 24, 1, 9, 17, 25]
+          k = 1：i = 0..7 → [2, 10, 18, 26, 3, 11, 19, 27]   ← 每个都 +2
+6) hoist  把 + 树摊平：[(i&amp;3)&lt;&lt;3,  k&lt;&lt;1,  i&gt;&gt;2]
+          含 k 的项只有 k&lt;&lt;1 → step = 1&lt;&lt;1 = 2
+          base = ((i &amp; 3) &lt;&lt; 3) + (i &gt;&gt; 2)            {+:1, &lt;&lt;:1, &amp;:1, &gt;&gt;:1}
+          base(5) = 8 + 1 = 9，9 + 1·2 = 11 ✓
+7) 动态   同样的树，叶子 4、2、8 换成 bm、bk、ld：
+          fold → ((i % bm) * ld) + ((k * bk) + (i // bm))
+          SR   → 不变（编译器不知道 bm 是不是 2 的幂）
+          hoist → step = bk，base 里还留着 *、%、//
+</code></pre>
+<p><strong>✎</strong> 草稿纸 ③：把运行例子代入一个线程（tid = 127, v = 3, k = 1）</p>
+<pre><code class="language-text">tc = idx2crd(127, (4, 32)) = (127 % 4, 127 // 4) = (3, 31)
+vc = idx2crd(3,   (4, 1))  = (3 % 4,   3 // 4)    = (3, 0)
+idx = 3·128 + 31·1 + 3·32 + 0·0 = 384 + 31 + 96 + 0 = 511
+(m, kk) = idx2crd(511, (32, 16)) = (511 % 32, 511 // 32) = (31, 15)
+offset = 31·64 + (1·16 + 15)·1 = 1984 + 31 = 2015          ← golden
+off_static_k1[127·4+3] = 2015 ✓
+化简后：(127&amp;3)&lt;&lt;7 = 384，127&gt;&gt;2 = 31，(3&amp;3)&lt;&lt;5 = 96 → idx = 511；511&amp;31 = 31，511&gt;&gt;5 =
+15
+        (31&lt;&lt;6) + ((1&lt;&lt;4) + 15) = 1984 + 31 = 2015 ✓
+</code></pre>
+<p>下面这个小游乐场可以改 tile 的 shape、ld 和模式。上面是当前阶段的表达式树，绿色是这个 pass 新造出来的节点（fold 在这个例子里只删不造，所以 ② 没有绿色；③ 里每个移位、按位与都是新的），红色虚线框是下一个 pass 会改写或删掉的节点。右边是矩阵本身，格子里写的是 tile 内索引 i（当前 k 那一块）。下方面板打印出每个函数应该返回的东西。试试把 shape 改成 (3,2)：3 不是 2 的幂，<code>% 3</code> 和 <code>// 3</code> 会一直留到最后。</p>
+
+<figure class="flow snap"><div class="flow-head">小游乐场 · 一个 tile 的地址表达式</div><img src="../figs/c1/c1_new-01.png" alt="小游乐场 · 一个 tile 的地址表达式" loading="lazy" style="width:100%;aspect-ratio:1461/1506"></figure>
+<h2 id="c1-5">图解详解：一棵地址表达式树怎样被一步步削减</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>这一节有七张可交互的图，每张对应一个要实现的函数。点按钮、拖滑块、把鼠标停在节点或格子上，下方面板会把当前状态逐步代入公式。所有图里的化简都由页面里的一份 JS 实现计算，规则和参考解逐条相同，并且在 2000 个随机表达式上和 Python 参考解对拍过，结果一致。</p>
+<p>整道题的数据流就是这几行：</p>
+<pre><code>e = copy_offset_expr(True)          # 图 1：TV layout → tile 坐标 → gmem offset，59 个节点
+f = fold(e)                         # 图 2：常量折叠 + 恒等式，自底向上到不动点
+s = strength_reduce(f)              # 图 3：×、÷、% 2 的幂 → 移位 / 按位与
+count_ops(s)                        # 图 4：结构相同的子树只算一次（CSE）
+layout_index_expr(i, sh, st, True)  # 图 5：先 coalesce，表达式化简看不出来的恒等函数直接消失
+base, step = hoist(e, &quot;k&quot;)          # 图 6：K 循环里只剩“指针 += step”
+# 图 7：真实 clang 把同一个 CuTe 地址编成什么指令
+</code></pre>
+<h3 id="c1-5-1">图 1 · 运行例子的表达式树：每个 pass 改了哪些节点</h3>
+<p><code>idx</code> （TV layout 算出的 tile 内索引）在 <code>m</code> 和 <code>kk</code> 里各用一次，所以这里把它画成左边单独一棵树，右边那棵树里紫色的 <code>idx</code> 叶子就指向它（这正是 CSE 之后的样子）。切换阶段看：fold 删掉 <code>·1</code> 、<code>·0</code> 和整个 <code>(v//4)·0</code> 分支（节点 59 → 41）；strength_reduce 节点数不变，只是把每个 <code>* // %</code> 换成 <code>&lt;&lt; &gt;&gt; &amp;</code> ；hoist 把 <code>k&lt;&lt;4</code> 整个拿走。切到“动态”再看：同样的位置留下了 <code>* bm</code> 、<code>% bm</code> 、<code>// bm</code> 、<code>* ld</code> 。</p>
+
+<figure class="flow snap"><div class="flow-head">copy_offset_expr 的两棵树</div><img src="../figs/c1/c1_new-02.png" alt="copy_offset_expr 的两棵树" loading="lazy" style="width:100%;aspect-ratio:1461/1342"></figure>
+<p>源码对照：<code>tv(tid, v)</code> 对每个顶层模式调用整数坐标版的 <code>crd2idx</code> ，它在最后一个模式上不取模（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/stride.hpp#L76-L95">crd2idx_itt ： Avoid recursion and mod on single/last iter</a> ），这就是题面规则 2 的出处。</p>
+
+<div class="callout warn"><div class="callout-title">注意 · 一个和真实 CuTe 的细微差别</div><p><code>tile.get_hier_coord(idx)</code> 调用的是带 stride 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/stride.hpp#L169-L215">idx2crd(i, s, d) = (i / d) % s</a> ，它对每个模式都取模，包括最后一个。所以 oracle 里真实的 <code>kk</code> 是 <code>(idx / 32) % 16</code> ，而本题的模型（<code>idx2crd_expr</code> ）把它写成 <code>idx // 32</code> 。对 <code>idx &lt; 512</code> 两者相等，所以 golden 一致；但真实汇编里多出来的 4 条指令（图 7 紫色）正是这个 <code>% 16</code> 。</p>
+</div>
+<h3 id="c1-5-2">图 2 · <code>fold</code> ：自底向上，一次访问一个节点</h3>
+<p><code>fold</code> 的核心是“先化简两个孩子，再看这个节点能用哪条规则”。下面按后序（左孩子、右孩子、自己）一个个节点播放。灰色是已经访问过但没变的节点，绿色是规则改写过的节点，黄色是当前节点，上方小框是它化简后的结果。注意 <code>((x*2)*4)*1</code> ：内层先变成 <code>x*8</code> ，外层看到的已经是 <code>x*8</code> 和 <code>1</code> ，所以一轮自底向上就做完了，第二轮只是确认没有变化。</p>
+
+<figure class="flow snap"><div class="flow-head">fold 的访问顺序与触发的规则</div><img src="../figs/c1/c1_new-03.png" alt="fold 的访问顺序与触发的规则" loading="lazy" style="width:100%;aspect-ratio:1461/1079"></figure>
+<h3 id="c1-5-3">图 3 · <code>strength_reduce</code> ：乘、除、模 2ⁿ 在二进制里是什么</h3>
+<p>为什么只有 2 的幂能换：在二进制里，<code>x·2ⁿ</code> 就是整体左移 n 位，<code>x // 2ⁿ</code> 就是右移 n 位（低 n 位掉出去），<code>x % 2ⁿ</code> 就是只留低 n 位（和 <code>2ⁿ−1</code> 按位与）。每一位的颜色跟着它自己走，你能看到移位只是在“搬格子”。换成 6、3、5 这样的数就没有这种对应关系，本题的规则保持原样。</p>
+
+<figure class="flow snap"><div class="flow-head">x 的二进制与三种改写</div><img src="../figs/c1/c1_new-04.png" alt="x 的二进制与三种改写" loading="lazy" style="width:100%;aspect-ratio:1461/747"></figure>
+<h3 id="c1-5-4">图 4 · <code>count_ops</code> ：同一个子树只算一次</h3>
+<p>这次把 <code>idx</code> 展开两份，画出完整的树。<code>count_ops</code> 从根开始先序遍历，第一次见到的子树计数（绿色），以后再遇到结构相同的子树就整棵跳过（半透明）。把鼠标停在任何一个节点上，所有和它结构相同的节点都会被黄框圈出来。切换到“每个节点都数”就是没有 CSE 的计数：静态化简后的 <code>&gt;&gt;</code> 会被数成 3 个，而测试要求 2 个。</p>
+
+<figure class="flow snap"><div class="flow-head">CSE：展开的树与 count_ops 的访问</div><img src="../figs/c1/c1_new-05.png" alt="CSE：展开的树与 count_ops 的访问" loading="lazy" style="width:100%;aspect-ratio:1461/1199"></figure>
+<h3 id="c1-5-5">图 5 · <code>coalesce_flat</code> ：表达式化简看不见的全局事实</h3>
+<p>列主序的 4×2 layout <code>(4,2):(1,4)</code> 把 i 映射到 i 自己，但它的表达式化简完是 <code>(i &amp; 3) + ((i &gt;&gt; 2) &lt;&lt; 2)</code> ：局部看，<code>&amp;3</code> 和 <code>&gt;&gt;2 &lt;&lt;2</code> 都没法再化简。coalesce 看的是模式之间的关系：前一个模式 <code>4:1</code> 走完一圈正好到 <code>4·1 = 4</code> ，等于下一个模式的 stride 4，所以两个模式能合成一个 <code>8:1</code> 。逐步播放看每个模式被丢掉、合并还是保留。最下面一排是 L(i)：全是绿色就说明它是恒等函数。</p>
+
+<figure class="flow snap"><div class="flow-head">coalesce 一个模式一个模式地合并</div><img src="../figs/c1/c1_new-06.png" alt="coalesce 一个模式一个模式地合并" loading="lazy" style="width:100%;aspect-ratio:1461/1023"></figure>
+<p>源码对照：CuTe 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L773-L815">bw_coalesce</a> 从右往左做同样的事（注释里那张“continue / replace_front / prepend”表），合并条件是 <code>is_constant&lt;true, s*d == d'&gt;</code> ：只有静态整数才能合并，动态 layout 的模式永远不会被 coalesce。<code>composition</code> 在动手之前先 <code>coalesce_x</code> 左边的 layout（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1134-L1141">composition</a> ）。概念讲解见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/02_layout_algebra.md">02_layout_algebra.md</a> 的 Coalesce 一节。</p>
+<h3 id="c1-5-6">图 6 · <code>hoist</code> ：K 循环里只剩“指针 += 16”</h3>
+<p>这是 CTA (0,0) 在 A[64,64] 上读的 32 行 × 64 列，四种颜色是 k = 0..3 四轮的 tile。选一个线程：它每一轮读同一行里连续的 4 个元素（v = 0..3），四轮之间正好往右挪 16 列，也就是 offset 加 16。<code>hoist</code> 证明了这一点：<code>offset = base(tid, v)</code> <code>+ k·16</code> ，base 只在循环外算一次。悬停任意格子可以反查它属于哪个 (tid, v, k)。</p>
+
+<figure class="flow snap"><div class="flow-head">一个线程四轮的地址 = base + k·step</div><img src="../figs/c1/c1_new-07.png" alt="一个线程四轮的地址 = base + k·step" loading="lazy" style="width:100%;aspect-ratio:1461/1562"></figure>
+<h3 id="c1-5-7">图 7 · 和真实编译器对照：clang -O2 的 ARM64 汇编</h3>
+<p>图里的数据来自写这页时的一次编译（Apple clang 21，<code>-O2</code>，ARM64）：用真实 CuTe 头文件编译 <code>oracle/c1_asm/index_fns.cpp</code>，再按助记符分类计数。本仓库的 <code>oracle/c1_asm.sh</code> 做同样的编译，把本机的结果写进 <code>tests/golden/c1_asm.json</code>（每个函数的指令数、乘除指令和完整的指令列表），编译器版本不同时数字会略有出入。第三行“静态 + unsigned”是额外编译的：把 <code>off_static</code> 的参数和 <code>idx</code> 改成 <code>unsigned</code> ，其余不变（Apple clang 21，同样的 <code>-O2</code> ），并用 2048 个 offset 和 golden 对拍过。下面的指令表按“作用”上色，悬停一行看它在算表达式里的哪一部分。</p>
+
+<figure class="flow snap"><div class="flow-head">off_static vs off_dynamic：指令数与每条指令的作用</div><img src="../figs/c1/c1_new-08.png" alt="off_static vs off_dynamic：指令数与每条指令的作用" loading="lazy" style="width:100%;aspect-ratio:1461/2363"></figure>
+<p>GPU 上整数除法没有单条硬件指令，编译器会展开成一串乘法和修正（CUDA C++ Programming Guide 的 <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#arithmetic-instructions">Arithmetic Instructions</a> 一节专门提醒整数除法和取模很贵，除数是 2 的幂时会被换成移位和按位与），所以“静态 layout 没有乘除”在 GPU 上比在 CPU 上更值钱。</p>
+<h3 id="c1-5-8">速查</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>做什么</th>
+<th>小例子 (4,2),ld=8</th>
+<th>运行例子（静态）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>idx2crd_expr(idx, shape)</code></td>
+<td>colex：c₀ = idx % s₀，cᵢ = (idx //Πs&lt;ᵢ) % sᵢ，最后一个只除不模</td>
+<td><code>(i % 4, i // 4)</code></td>
+<td><code>idx2crd(tid,(4,32)) = (tid%4, tid//4)</code></td>
+</tr>
+<tr>
+<td><code>layout_expr(stride, coord)</code></td>
+<td>Σ cᵢ·dᵢ，从左到右累加</td>
+<td><code>(i%4)·8 + (k·2 + i//4)·1</code></td>
+<td>59 节点，<code>{+:5, *:7, %:3, //:3}</code></td>
+</tr>
+<tr>
+<td><code>fold</code></td>
+<td>c⊕c → 值；·1、+0、//1 去掉；·0、%1 → 0；(x·c₁)·c₂、(x//c₁)//c₂、(x+c₁)+c₂ 合并；常量放右边</td>
+<td><code>{+:2, *:2, %:1, //:1}</code></td>
+<td>41 节点，<code>{+:4, *:4, %:3, //:2}</code></td>
+</tr>
+<tr>
+<td><code>strength_reduce</code></td>
+<td>右边是 2ⁿ（n ≥ 1）：·→&lt;&lt;n，// →&gt;&gt;n，%→&amp;(2ⁿ−1)</td>
+<td><code>((i&amp;3)&lt;&lt;3) + ((k&lt;&lt;1) + (i&gt;&gt;2))</code></td>
+<td><code>{+:4, &lt;&lt;:4, &amp;:3, &gt;&gt;:2}</code> ；动态 <code>{+:4, *:4, %:1, //:1, &amp;:2, &lt;&lt;:1, &gt;&gt;:1}</code></td>
+</tr>
+<tr>
+<td><code>count_ops</code></td>
+<td>先序遍历，结构相同的子树只计一次；常量子树不计</td>
+<td>—</td>
+<td>不去重会数成 <code>{+:6, &lt;&lt;:6, &amp;:5, &gt;&gt;:3}</code></td>
+</tr>
+<tr>
+<td><code>coalesce_flat</code></td>
+<td>丢尺寸 1；sᵢ·dᵢ == dᵢ₊₁ 就合并</td>
+<td><code>(4,2):(1,4) → (8,):(1,)</code></td>
+<td><code>(32,16):(1,32) → (512,):(1,)</code></td>
+</tr>
+<tr>
+<td><code>hoist(e, 'k')</code></td>
+<td>simplify 后摊平 +，含 k 的项必须是 k、k·c、k&lt;&lt;n</td>
+<td>step = 2</td>
+<td>step = 16（动态 <code>bk</code> ），base <code>{+:3, &lt;&lt;:3, &amp;:3, &gt;&gt;:2}</code></td>
+</tr>
+<tr>
+<td>真实 clang（ARM64）</td>
+<td>静态 24 条，0 乘 0 除；动态 22 条，5 个乘类 + 2 个 sdiv；静态 + unsigned 只要 9 条</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="c1-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ 一个线程的 copy 地址：从 18 个运行时运算到 13 个廉价运算</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;r&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;原始表达式&quot;, &quot;s&quot;: &quot;+5 ×7 %3 ÷3&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;f&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;fold 之后&quot;, &quot;s&quot;: &quot;+4 ×4 %3 ÷2&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;strength_reduce&quot;, &quot;s&quot;: &quot;+4 &lt;&lt;4 &amp;3 &gt;&gt;2&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;hoist(k)&quot;, &quot;s&quot;: &quot;base 一次，每轮 +16&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;动态版本&quot;, &quot;s&quot;: &quot;+4 ×4 %1 ÷1 …&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;r&quot;, &quot;b&quot;: &quot;f&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;f&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;h&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;f:b&quot;, &quot;b&quot;: &quot;d:l&quot;, &quot;t&quot;: &quot;bm 未知&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="r"><div class="step-title">1. 构造</div><p>按 CuTe 的顺序写：<code>tc = idx2crd(tid, (4,32))</code>、<code>vc = idx2crd(v, (4,1))</code>，<code>idx = tc·(128,1) + vc·(32,0)</code>，<code>(m, kk) = idx2crd(idx, (32,16))</code>，<code>offset = m·64 + (k·16 + kk)·1</code>。没化简时 CSE 后有 <code>{+:5, *:7, %:3, //:3}</code>。</p>
 </div><div class="step" data-hl="r,f"><div class="step-title">2. 常量折叠</div><p><code>(tid//4)*1 → tid//4</code>、<code>(v//4)*0 → 0</code>、<code>(...)*1 → ...</code>：剩 <code>{+:4, *:4, %:3, //:2}</code>。结果是 <code>((((tid%4)*128 + tid//4 + (v%4)*32) % 32) * 64) + (k*16 + (... // 32))</code>。</p>
@@ -317,16 +517,16 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="s,h"><div class="step-title">4. 循环外提</div><p><code>hoist(e, 'k')</code> 得到 <code>step = 16</code>：K 循环里每轮只需要把基地址加 16，base 只在循环外算一次（<code>{+:3, &lt;&lt;:3, &amp;:3, &gt;&gt;:2}</code>）。这正是真实 kernel 里“每个 k-tile 指针前进 BK 个元素”。</p>
 </div><div class="step" data-hl="f,d"><div class="step-title">5. 动态版本</div><p>同样的结构，但 stride 是 <code>4*bm</code>、<code>bm</code>、<code>ld</code>，shape 是 <code>(bm, bk)</code>：化简后还剩 <code>{*:4, //:1, %:1, &amp;:2, &lt;&lt;:1, &gt;&gt;:1, +:4}</code>：编译器不知道 bm 是 32，就只能真的去乘、真的去除。外提仍然成立，只是步长变成 <code>bk</code>。</p>
 </div></div></div>
-<h2 id="c1-5">易错点</h2>
+<h2 id="c1-7">易错点</h2>
 <ul>
 <li><strong>colex 写成行主序。</strong> CuTe 的第一个模式变化最快：<code>idx2crd(i, (4,8,2)) = (i%4, (i//4)%8, i//32)</code>。测试 <code>test_idx2crd_colex_last_mode_not_wrapped</code> 抓这个。</li>
 <li><strong>最后一个模式也取模。</strong> CuTe 不对最后一个模式取模，越界的索引沿最后一个 stride 走；<code>idx2crd(70, (4,8,2))</code> 是 <code>(2,1,2)</code> 而不是 <code>(2,1,0)</code>。</li>
-<li><strong>fold 只做一遍。</strong> <code>((x*2)*4)*1</code> 需要多轮；测试 <code>test_fold_identities_and_constant_chains</code>。</li>
+<li><strong>fold 不先递归化简孩子。</strong> 规则必须作用在“孩子已经化简过”的节点上：自顶向下只看一次的话，<code>((x*2)*4)*1</code> 只会去掉最外层的 <code>*1</code>，剩下 <code>(x*2)*4</code>。先递归孩子再改写自己（后序），一轮就能得到 <code>x*8</code>（图 2）；外面的 while 循环是保证到达不动点的安全网（用这套规则在大量随机表达式上验证过，自底向上一轮之后第二轮不会再变）。测试 <code>test_fold_identities_and_constant_chains</code>。</li>
 <li><strong>对非 2 的幂也做强度削减。</strong> <code>x*6</code> 不能换成移位（可以拆成移位加法，但不在本题规则里）；测试 <code>test_strength_reduce_only_powers_of_two</code>。</li>
 <li><strong>count_ops 不去重。</strong> idx 在 m 和 kk 里各出现一次，不去重会把静态版本数成 <code>&gt;&gt;:3</code>；测试要求 <code>{+:4, &lt;&lt;:4, &amp;:3, &gt;&gt;:2}</code>。</li>
 <li><strong>以为“除以 2 的幂就是右移”对 C++ int 永远成立。</strong> 本题假设非负；真实 C++ 用有符号 <code>int</code>，编译器要插入符号修正（见下面汇编里的 <code>csel</code>、<code>csneg</code>）。用 <code>uint32_t</code> 或让编译器知道值非负，才能得到纯移位。</li>
 </ul>
-<h2 id="c1-6">上机验证</h2>
+<h2 id="c1-8">上机验证</h2>
 <p>用真实 CuTe 算出 golden（<code>./check.sh oracle c1</code>），再看真实 clang 把这两种写法编译成什么（<code>oracle/c1_asm.sh</code>，编译 <a class="src" href="../oracle/c1_asm/index_fns.cpp">oracle/c1_asm/index_fns.cpp</a>，<code>-O2 -S</code>）。本机是 Apple silicon，所以下面是 ARM64 主机汇编，不是 GPU 的 SASS；但“静态 layout 被折叠成移位和按位与、动态 layout 留下乘除”这个结论是一样的。</p>
 <pre><code class="language-text">$ playground/run.sh playground/c1_static_folding.cpp
 TV layout (tid,v) -&gt; tile idx : ((_4,_32),(_4,_1)):((_128,_1),(_32,_0))
@@ -341,7 +541,7 @@ offset_dynamic 22 instructions, 7 mul/div ['madd', 'msub', 'mul', 'sdiv']
 </code></pre>
 <p><code>offset_static</code> 的汇编（节选）全是 <code>add</code>、<code>and</code>、<code>asr</code>、<code>lsl</code> 和有符号修正用的 <code>csel</code> / <code>csneg</code>，最后两条是 <code>add w9, w9, w2, lsl #4</code>（+ k·16）和 <code>add w0, w9, w8, lsl #6</code>（+ m·64）。<code>offset_dynamic</code> 里则有 <code>mul w9, w9, w3</code>（× bm）、<code>sdiv w9, w8, w3</code>（÷ bm）、<code>msub</code>（% bm）、<code>sdiv w10, w9, w4</code>（÷ bk）、<code>madd</code>（m × ld + …）。</p>
 <p>两点值得注意：静态版本的指令总数（25）并不比动态版本（22）少，多出来的是有符号除法的修正指令；真正的差别是没有乘法和除法，而整数除法在 CPU 和 GPU 上都比移位贵一个数量级。在 GPU 上可以用 <code>nvcc -arch=sm_80 -cubin</code> + <code>cuobjdump -sass</code> 对一个 kernel 做同样的对比（本机没有 CUDA 编译器，未运行）。</p>
-<h2 id="c1-7">三级提示</h2>
+<h2 id="c1-9">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">e = copy_offset_expr(True)
 evaluate(e, {&quot;tid&quot;: 127, &quot;v&quot;: 3, &quot;k&quot;: 1})   # 2015
@@ -375,7 +575,7 @@ pretty(simplify(layout_index_expr(V(&quot;i&quot;), (32, 16), (1, 32), coalesce=
 <li><code>k * bk</code> 变成 <code>k &lt;&lt; 4</code>，<code>(...) // bm</code> 和 <code>% bm</code> 仍然在（bm 动态），<code>m * ld</code> 仍然是乘法。静态信息越多，后端越能把乘除换成移位；这也是 CUTLASS 把 tile 大小都做成模板参数、把问题尺寸（M、N、K、ld）留给运行时的原因。</li>
 </ol>
 </div></details></div></details>
-<h2 id="c1-8">参考解</h2>
+<h2 id="c1-10">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/c1_static_folding.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/c1_static_folding.py</span><span class="muted small">328 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;C1 · 编译期化简：常量折叠、coalesce、强度削减与循环不变量外提 — reference solution.
 
@@ -705,7 +905,7 @@ def hoist(e, loop_var: str):
             raise ValueError(f&quot;term {pretty(t)} is not linear in {loop_var}&quot;)
         step = s if step is None else (&quot;+&quot;, step, s)
     return simplify(base if base is not None else C(0)), simplify(step if step is not None else C(0))</code></pre></div></div></details>
-<h2 id="c1-9">面试官追问 &amp; 对照源码</h2>
+<h2 id="c1-11">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>本题的 <code>v % 4</code> 在 v ∈ [0,4) 时其实是恒等的，真实编译器会把 <code>for v in 0..3</code> 展开，v 变成常量。CuTe 里这类展开靠 <code>CUTE_UNROLL</code> 和静态的 <code>size(...)</code>；给 <code>simplify</code> 加一个“值域分析”，你能消掉哪些运算？</li>
 <li>CuTe 的 composition 先做 <code>coalesce_x</code> 再做分模除法（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1033">composition_impl</a>）。为什么它要在“组合之前”而不是“组合之后”规范化？</li>
@@ -720,12 +920,22 @@ def hoist(e, loop_var: str):
 <a class="o2" href="#c1-1">题面速览</a>
 <a class="o2" href="#c1-2">直觉与类比</a>
 <a class="o2" href="#c1-3">图解：一个地址表达式经过的 pass</a>
-<a class="o2" href="#c1-4">逐步演示</a>
-<a class="o2" href="#c1-5">易错点</a>
-<a class="o2" href="#c1-6">上机验证</a>
-<a class="o2" href="#c1-7">三级提示</a>
-<a class="o2" href="#c1-8">参考解</a>
-<a class="o2" href="#c1-9">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#c1-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#c1-5">图解详解：一棵地址表达式树怎样被一步步削减</a>
+<a class="o3" href="#c1-5-1">图 1 · 运行例子的表达式树：每个 pass 改了哪些节点</a>
+<a class="o3" href="#c1-5-2">图 2 · fold ：自底向上，一次访问一个节点</a>
+<a class="o3" href="#c1-5-3">图 3 · strength_reduce ：乘、除、模 2ⁿ 在二进制里是什么</a>
+<a class="o3" href="#c1-5-4">图 4 · count_ops ：同一个子树只算一次</a>
+<a class="o3" href="#c1-5-5">图 5 · coalesce_flat ：表达式化简看不见的全局事实</a>
+<a class="o3" href="#c1-5-6">图 6 · hoist ：K 循环里只剩“指针 += 16”</a>
+<a class="o3" href="#c1-5-7">图 7 · 和真实编译器对照：clang -O2 的 ARM64 汇编</a>
+<a class="o3" href="#c1-5-8">速查</a>
+<a class="o2" href="#c1-6">逐步演示</a>
+<a class="o2" href="#c1-7">易错点</a>
+<a class="o2" href="#c1-8">上机验证</a>
+<a class="o2" href="#c1-9">三级提示</a>
+<a class="o2" href="#c1-10">参考解</a>
+<a class="o2" href="#c1-11">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

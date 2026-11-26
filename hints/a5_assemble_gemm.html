@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">A5 · Track A · 从零设计：五个空间映射问题 · 65 分钟 · 难</div><h1>A5 · 把五个映射拼成完整的 Tiled GEMM：模拟、统计、追踪 C[5][7]</h1><p class="lede">把 A1–A4 的五个映射首尾相连，写出一个只靠索引映射算出来的 64×64 Tiled GEMM：逐 CTA、逐 K 片地把数据从全局内存搬进 swizzle 过的 SMEM，再按 MMA 的 TV 布局读进寄存器、在累加器里累加、最后写回一次。顺便统计访存 sector、SMEM wavefront 和 mma 条数，并把 C[5][7] 经过的每一层都追踪出来，和真实 CuTe 的 partition 结果对拍。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/a5_assemble_gemm.py"><code>mine/a5_assemble_gemm.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_a5_assemble_gemm.py"><code>tests/test_a5_assemble_gemm.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/a5_assemble_gemm.py"><code>solutions/a5_assemble_gemm.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A5"> 我已完成这道题</label></header>
 <h2 id="a5-1">题面速览</h2>
@@ -304,7 +316,201 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="a5-3">图解：一个 K 片里数据走过的五层</h2>
 
 <figure class="flow"><div class="flow-head">CTA (bm, bn) 的一个 K 片<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;CTA (bm, bn) 的一个 K 片&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;g&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;全局 A, B&quot;, &quot;s&quot;: &quot;local_tile → (32,16)&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cp&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Copy TV&quot;, &quot;s&quot;: &quot;t → 行 t//4&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;SMEM&quot;, &quot;s&quot;: &quot;Sw&lt;2,2,2&gt; ∘ (32,16)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rg&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;寄存器&quot;, &quot;s&quot;: &quot;MMA TV_A / TV_B&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;累加器&quot;, &quot;s&quot;: &quot;(128, 8)，跨 K 留住&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;全局 C&quot;, &quot;s&quot;: &quot;只写一次&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;g&quot;, &quot;b&quot;: &quot;cp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cp&quot;, &quot;b&quot;: &quot;sm&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;rg&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;rg&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;mma.sync&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;acc&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 150.0}}"></div><figcaption>每一层的索引都来自前面四题的函数；<code>simulate_gemm</code> 里不允许出现 <code>A[32*bm:..., ...]</code> 这样的切片直接参与计算，否则就不是在检验映射了。</figcaption></figure>
-<h2 id="a5-4">逐步演示</h2>
+<h2 id="a5-4">从小例子开始：先在草稿纸上手算</h2>
+<p>这道题的尺寸是固定的（64×64×64，tile 32×32×16，128 线程），没法像 A1 那样“换个更小的矩阵”。这里的“小例子”是一个元素：只追 C[5][7] 和它在 k = 3 用到的 A[5][3]、B[7][3]，把五个映射一层层手算出来；然后换同一个 C[5][7] 的另一个 k、换别的 CTA；最后把“一个元素”放大到“一条指令”和“一个 CTA”的计数。把每一层的数都写出来之后，<code>simulate_gemm</code> 只是把同样的算式套进循环。</p>
+<p>① 一个元素、一个 k：trace(5, 7, 3) 五层映射各算一次，全是整除、取模和一次异或。</p>
+<pre><code>CTA (0,0)，k_tile 0
+A：copy (20,3) → smem 87 → mma (21,1),
+(85,1)
+B：copy (28,3) → smem 127 → mma (29,1),
+(61,1)
+C：acc (23,1)
+</code></pre>
+<p>② 同一个 C[5][7]，换 k</p>
+<p>C 的持有者不随 k 变，A、B 的输入每个 k 都换一个。</p>
+<pre><code>k = 63：k_tile 3，tile 列 15
+A：copy (23,3) → smem 91 → mma (23,5),
+(87,5)
+B：copy (31,3) → smem 115 → mma (31,3),
+(63,3)
+C：acc 仍是 (23,1)
+</code></pre>
+<p>③ 别的 CTA：trace(40, 50, 20)</p>
+<p>先减掉 CTA 起点，后面的算式和 ① 完全一样。</p>
+<pre><code>CTA (1,1)，k_tile 1，A tile (8,4)，B tile
+(18,4)
+A：copy (33,0) → smem 132 → mma (2,2),
+(66,2)
+B：copy (73,0) → smem 300 → mma (10,4),
+(42,4)
+C：tile (8,18)，acc (1,6)
+</code></pre>
+<p>④ 一般：一个元素 → 一条指令 → 一个 CTA</p>
+<p>每层的公式，以及每个 CTA 的四个计数。</p>
+<pre><code>CTA = (m//32, n//32)，kt = k//16
+copy 线程 t = 4·row + col//4，v = col%4
+smem = Sw&lt;2,2,2&gt;(16·row + col)
+每 CTA：sector 256 · 写 64 · 读 256 · mma
+32
+</code></pre>
+<p><strong>✎</strong> 草稿纸：trace(5, 7, 3)，从全局坐标一路追到累加器</p>
+<pre><code class="language-text">0) 记号      A 是 M×K、B 是 N×K（都按 K 连续存），C[m][n] = Σ_k A[m][k]·B[n][k]
+             C[5][7] 在 k = 3 这一项要用 A[5][3] 和 B[7][3]
+1) 哪个 CTA、哪个 K 片（local_tile 的逆）
+             bm = 5 // 32 = 0      bn = 7 // 32 = 0      kt = 3 // 16 = 0
+             tile 内坐标：A (5 − 32·0, 3 − 16·0) = (5, 3)    B (7 − 0, 3 − 0) = (7, 3) C (5, 7)
+             C[5][7] 一共要 64 个 k：kt = 0,1,2,3 四个 K 片，每片 16 个，都在同一个 CTA
+(0,0) 里累加
+2) 谁把它从全局搬进 SMEM（Copy TV 的逆）
+             copy_coords(t) = [(t//4, 4·(t%4) + v) for v in 0..3]：线程 t 搬第 t//4 行的 4 个连续 K
+             A (5,3)：t = 4·5 + 3//4 = 20，v = 3 % 4 = 3        验算 copy_coords(20) = [(5,0),(5,1),(5,2),(5,3)] ✓
+             B (7,3)：t = 4·7 + 3//4 = 28，v = 3
+             全局字节：A[5][3] → 2·(5·64 + 3) = 646 → sector 646 // 32 = 20
+                       B[7][3] → 2·(7·64 + 3) = 902 → sector 902 // 32 = 28
+3) 放在 SMEM 的哪个位置（Swizzle&lt;2,2,2&gt; ∘ (32,16):(16,1)）
+             A：x = 16·5 + 3 = 83 = 0b01_01_0011      bits[4,6) = (83 &gt;&gt; 4) &amp; 3 = 1
+                 异或到 bits[2,4)：83 ^ (1 &lt;&lt; 2) = 83 ^ 4 = 87         → smem 87
+             B：x = 16·7 + 3 = 115 = 0b01_11_0011     (115 &gt;&gt; 4) &amp; 3 = 3 → 115 ^ 12 = 127
+             A 的 87 号 half 在字节 174、word 43、bank 43 % 32 = 11
+4) 谁把它从 SMEM 读进寄存器（MMA TV 的逆，有两个持有者）
+             t = lane + 32·wm + 64·wn，lane = 4g + q
+             A (5,3)：行 5 &lt; 16 → wm = 0，g = 5；列 3 = 2q + (i&amp;1) + 8·(i&gt;&gt;2) → q = 1, i = 1
+                      lane = 4·5 + 1 = 21；wn 取 0 或 1 都要这一行 → t = 21, 85，v = 1
+             B (7,3)：行 7 = g + 8·(wn + 2·(v//4)) → g = 7, wn = 0, v//4 = 0；列 3 → q = 1, i = 1
+                      lane = 4·7 + 1 = 29；wm 取 0 或 1 → t = 29, 61，v = 1
+5) 在哪个累加器里加起来
+             C (5,7)：行 5 → wm = 0, g = 5, i&gt;&gt;1 = 0；列 7 = 8·(wn + 2·(v//4)) + 2q + (i&amp;1) → wn = 0, q = 3, i = 1
+                      lane = 4·5 + 3 = 23，t = 23，v = 1  → acc[23, 1]
+             它属于 warp 0 的第 v//4 = 0 条 mma（rep 0）；4 个 K 片各执行一次，K 循环结束后才写回 C[5][7]
+6) 放大到一个 CTA 的计数（CTA (0,0)，四个 CTA 都一样）
+             一个 K 片：copy 指令 = 4 warp × 2（A、B）= 8 条，每条 32 lane × 8 字节 = 256字节 = 8 行 × 32 字节
+                        → gmem sector 8 × 8 = 64，SMEM 写 8 × ⌈256/128⌉ = 16 个
+wavefront
+                        LDS.32 = 4 warp × (4 + 4) = 32 条，每条 2 个 wavefront（2 路冲突）→ 64
+                        mma = 4 warp × 2 = 8
+             4 个 K 片：gmem_sectors 256 · smem_store_wavefronts 64 ·
+smem_load_wavefronts 256 · mma 32
+</code></pre>
+<p>下面这张图就是上面这张草稿纸。三个滑块选 (m, n, k)，四列依次是 全局 → CTA tile 与 copy 线程 → SMEM（8 行 × 32 bank）→ MMA 寄存器持有者，最后一行是 C 的累加器和写回。箭头连起来的就是 <code>trace(m, n, k)</code> 的每一层；下方面板逐步代入公式，最后一行打印 <code>trace</code> 应该返回的 dict。</p>
+
+<figure class="flow snap"><div class="flow-head">端到端追踪：一个元素经过的五层映射</div><img src="../figs/a5/a5_new-01.png" alt="端到端追踪：一个元素经过的五层映射" loading="lazy" style="width:100%;aspect-ratio:1461/2123"></figure>
+<h2 id="a5-5">图解详解：五个映射怎样拼成一个 GEMM</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>上一节只追了一个元素。这一节把每一层放大到“一条指令”和“一个 K 片”：先看整个 CTA 的 K 循环和四个计数器怎么涨，然后依次看 copy 怎样碰全局内存的 sector、SMEM 写读怎样撞 bank、<code>wavefronts</code> 怎样算、mma 怎样把寄存器拼成矩阵并在累加器里累加。整道题的骨架就是下面这段伪代码，每一行旁边标了对应的图：</p>
+<pre><code>for bm in range(2):
+    for bn in range(2):                                   # 4 个 CTA，计数各自独立（图 1）
+        acc = zeros((128, 8))                             # 累加器：128 线程 × 8 个值，整个 K
+        for kt in range(4):                               # K 循环（图 1）
+            for X in (A, B):                              # gmem → smem：每个 warp 1 条 cop
+                for w in range(4):
+                    t in warp w: copy_coords(t) → 全局 (row0 + r, 16·kt + c) → sX[smem_off
+                    stats: + 不同 sector 数，+ wavefronts(写的字节区间)
+            for w in range(4):                            # smem → 寄存器：每 warp A 4 条 +
+                for j in range(4): rX[t, 2j], rX[t, 2j+1] = sX[smem_offset(tiled_tv 坐标)]
+                    stats: + wavefronts(32 个 lane 各 4 字节)
+            for w in range(4):                            # 每 warp 2 条 mma.sync（图 5）
+                for rep in (0, 1): 用 ptx_a/b/c 拼成 16×16 · (8×16)ᵀ，加回 acc[t, i + 4·rep]
+        按 tiled_tv(&quot;C&quot;) 把 acc 写回 C，c_writes += 1    # epilogue（图 5）
+</code></pre>
+<h3 id="a5-5-1">图 1 · 一个 CTA 的 K 循环：四个阶段与四个计数器</h3>
+<p>一个 K 片分四个阶段：①copy A ②copy B（gmem → smem）③LDS.32（smem → 寄存器）④mma.sync。点“▶ 播放”或拖动步数，左边是三块全局矩阵上当前 K 片的位置，右边是 <code>stats[(bm, bn)]</code> 的四个计数器，下面的表按 K 片记账。值得注意的三点：</p>
+<ul>
+<li>每个 K 片的增量完全一样（64 / 16 / 64 / 8），所以总数就是 4 倍。四个 CTA 也完全一样。</li>
+<li>C tile 在 K 循环里一直不动，只是颜色越来越深；直到最后的 epilogue 才写回一次。</li>
+<li>把 swizzle 换成 <code>Sw&lt;1,3,3&gt;</code> ，只有 LDS 那一列从 64 变成 32；换成“不 swizzle”和 <code>Sw&lt;2,2,2&gt;</code> 完全一样。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">CTA (bm, bn) 的 K 循环与 stats 计数</div><img src="../figs/a5/a5_new-02.png" alt="CTA (bm, bn) 的 K 循环与 stats 计数" loading="lazy" style="width:100%;aspect-ratio:1461/942"></figure>
+<p>源码对照：真实 kernel 的 K 循环在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L262-L299">sgemm_sm80.cu L262-L299</a> （外层 <code>while</code> 是 K 片，内层 <code>k_block</code> 是一个 K 片里的 MMA_K 步），累加器在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L170">L170</a> 清零一次，epilogue 是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L309">L309</a> 的 <code>axpby</code> 。</p>
+<h3 id="a5-5-2">图 2 · gmem → smem 的 copy：一条指令碰几个 sector</h3>
+<p>左边是一个 K 片的 A（或 B）tile，32 行 × 16 个 K，每 4 个格子是一个线程（标着 t），颜色是 warp。右边每一行是对应的那一整行全局内存：64 个 half = 128 字节，竖线把它分成 4 个 32 字节 sector。选一个 warp，看它的一条 copy 指令在右边点亮了哪些字节、碰了哪些 sector。</p>
+<ul>
+<li>本题的 Copy TV：一个 warp = 8 行，每行 4 个线程 × 4 个 half = 32 字节，起点 <code>2·16·kt = 32·kt</code> 字节正好对齐 sector。8 行 → 8 个 sector，256 字节全有用。</li>
+<li>切到“反例”：每个 lane 只搬 1 个 half，32 个 lane 沿 M 排成一列。一条指令碰 32 行 → 32 个 sector，每个只用 2 字节；一个 K 片要 16 条这样的指令（这正是提示 3 第 1 题的答案）。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">Copy TV → 全局字节地址 → 32 字节 sector</div><img src="../figs/a5/a5_new-03.png" alt="Copy TV → 全局字节地址 → 32 字节 sector" loading="lazy" style="width:100%;aspect-ratio:1461/1219"></figure>
+<p>源码对照：Copy TV 由 <code>make_tiled_copy(atom, ThrLayout, ValLayout)</code> 给出，真实 kernel 用的是 16×8 线程、每线程 8 个 half（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L368-L373">sgemm_sm80.cu L368-L373</a> ），本题缩成 32×4 线程、每线程 4 个 half；每个线程的那一份由</p>
+<p><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L358-L385">ThrCopy::partition_S / partition_D</a> 切出来，在 kernel 里对应 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L119-L124">L119-L124</a> 。</p>
+<h3 id="a5-5-3">图 3 · SMEM 的 bank 视图：swizzle 之后写在哪、读的时候撞不撞</h3>
+<p>SMEM 是 32 个 bank × 4 字节。一个 (32,16) 的 half tile 是 1024 字节 = 256 个 word = 8 行 × 32 bank（右图），每个 bank 行装 4 个逻辑行（每行 16 个 half = 8 个 word）。左图是逻辑 tile，选中的指令碰到的格子会亮起来；右图每个格子里写的是访问这个 word 的 lane。底下的柱子是每个 bank 里不同 word的个数，wavefront 数 = max(最高的柱子, <code>⌈</code>字节数 / 128<code>⌉</code>)。</p>
+<ul>
+<li>copy 写：每个 lane 写 8 字节 = 2 个 word，32 lane 正好铺满 2 个 bank 行。每个 bank 2 个 word，但字节下限<code>⌈</code>256/128<code>⌉</code> 也是 2：这是满带宽，不算冲突。</li>
+<li>LDS.32 读 A：lane (g, q) 读第 g 行第 2q、2q+1 个 half，即 word <code>8g + q</code> （不 swizzle 时）。g 和 g+4 相差 32 个 word，落在同一个 bank：2 路冲突，128 字节却要 2 个 wavefront。</li>
+<li>Sw&lt;2,2,2&gt; 用行号的低 2 位去改 word 的第 [1,3) 位：g 和 g+4 的低 2 位相同，被挪到同一个地方，冲突还在。Sw&lt;1,3,3&gt; 用行号的第 2 位改 word 的第 2 位：g+4 正好被挪开 4 个 bank，冲突消失。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">SMEM：逻辑 tile ↔ 8 × 32 bank</div><img src="../figs/a5/a5_new-04.png" alt="SMEM：逻辑 tile ↔ 8 × 32 bank" loading="lazy" style="width:100%;aspect-ratio:1461/1093"></figure>
+<p>源码对照：<code>Swizzle&lt;B,M,S&gt;</code> 的定义（<code>x ^ ((x &amp; yyy_msk) &gt;&gt; S)</code> ）在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">swizzle.hpp 的 Swizzle</a> ；真实 kernel 用 <code>Swizzle&lt;3,3,3&gt;</code> 配 8×64 的原子（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L357-L362">sgemm_sm80.cu L357-L362</a> ），因为它用 <code>ldmatrix</code> / 128 位访问，读法不同，需要的 swizzle 也不同。bank 的硬件规则见 CUDA C++ Programming Guide 的 <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory">Shared Memory</a> 一节。</p>
+<h3 id="a5-5-4">图 4 · <code>wavefronts(byte_ranges)</code> ：两个下限取大</h3>
+<p><code>wavefronts</code> 是你要实现的第一个函数。它只做三件事：① 把每个 <code>(start, nbytes)</code> 展开成 4 字节 word 的集合（重复的 word 只算一次 = 广播）；② 按 <code>word % 32</code> 分桶，最高的桶就是“同一 bank 必须串行”的下限；③ 一个 wavefront 最多 128 字节，<code>⌈4·|words| / 128⌉</code> 是带宽下限。两者取大。下面的图把每个 bank 画成一根柱子，柱子里每一格是一个不同的 word（格子里写 word 号），虚线是带宽下限。</p>
+
+<figure class="flow snap"><div class="flow-head">wavefronts：每个 bank 里的不同 word</div><img src="../figs/a5/a5_new-05.png" alt="wavefronts：每个 bank 里的不同 word" loading="lazy" style="width:100%;aspect-ratio:1461/643"></figure>
+<h3 id="a5-5-5">图 5 · mma.sync 与累加器：寄存器怎样拼回矩阵，C 怎样只写一次</h3>
+<p>2×2 个 warp 铺满 32×32 的 C tile：warp <code>w</code> 的 <code>wm = w % 2</code> 决定 M 方向的 16 行，<code>wn = w // 2</code> 决定 N 方向的 8 列起点，每个 warp 再沿 N 重复一次（rep 0 / rep 1，相隔 16 列）。所以一个 warp 每个 K 片执行 2 条 <code>m16n8k16</code> ：A 的 16 行 × 16 个 K，乘 B 的 8 行 × 16 个 K 的转置，得到 C 的 16×8。选 warp、rep 和 lane，看这个 lane 的 A、B、C 寄存器落在哪些格子（格子里写的是寄存器号 v）。悬停 C 的格子，看它由哪个 (t, v) 累加、由哪条 mma 产生。</p>
+
+<figure class="flow snap"><div class="flow-head">TiledMMA 2×2：A rows · B rows → C 16×8</div><img src="../figs/a5/a5_new-06.png" alt="TiledMMA 2×2：A rows · B rows → C 16×8" loading="lazy" style="width:100%;aspect-ratio:1461/1386"></figure>
+<p>源码对照：TiledMMA 的定义（<code>SM80_16x8x16_F16F16F16F16_TN</code> ，2×2 个 atom，<code>Tile&lt;_32,_32,_16&gt;</code> ）在</p>
+<p><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L375-L377">sgemm_sm80.cu L375-L377</a> ；每个线程的 A、B、C 分区由 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_atom.hpp#L460-L495">ThrMMA::partition_A / B / C</a> 给出，kernel 里对应 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L157-L161">L157- L161</a> 。<code>m16n8k16</code> 的寄存器排布（本题的 <code>ptx_a / ptx_b / ptx_c</code> ）见 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-float">Matrix Fragments for</a></p>
+<p><a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-float">mma.m16n8k16</a>。整体结构的讲解见 CuTe 文档 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/0x_gemm_tutorial.md">0x_gemm_tutorial.md</a>。</p>
+<h3 id="a5-5-6">速查：每一层的公式和计数</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>层</th>
+<th>正向（simulate_gemm 用）</th>
+<th>逆向（trace 用）</th>
+<th>每 CTA 计数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CTA / K 片</td>
+<td>A 全局 (32·bm + r, 16·kt + c)，B (32·bn + r, 16·kt + c)</td>
+<td>bm = m // 32，bn = n// 32，kt = k // 16，tile 坐标 = 减去起点</td>
+<td>4 个 K 片</td>
+</tr>
+<tr>
+<td>Copy TV</td>
+<td>t → 行 t // 4，列 4·(t % 4) + v，v = 0..3</td>
+<td>t = 4·row + col // 4，v = col % 4（双射，唯一）</td>
+<td>gmem_sectors = 4 kt × 2 × 4 warp × 8 = 256</td>
+</tr>
+<tr>
+<td>SMEM</td>
+<td>offset = Sw&lt;2,2,2&gt;(16·r + c) = x^ ((x &gt;&gt; 2) &amp; 0b1100)</td>
+<td>同一个公式（写读必须一致）</td>
+<td>store = 4 × 2 × 4 × 2 = 64</td>
+</tr>
+<tr>
+<td>MMA TV</td>
+<td>tiled_tv(A/B)[t + 128·v] = r + 32·c；LDS j 读 v = 2j, 2j+1</td>
+<td>遍历找 offset = row + 32·col，A、B 各有 2 个持有者</td>
+<td>load = 4 kt × 4 warp × 8 条 × 2 = 256（Sw&lt;1,3,3&gt;为 128）</td>
+</tr>
+<tr>
+<td>mma.sync</td>
+<td>每 warp 每 K 片 rep 0、rep 1 两条：acc[t, i + 4·rep] += (a·bᵀ) [ptx_c(lane, i)]</td>
+<td>—</td>
+<td>mma = 4 × 4 × 2 = 32</td>
+</tr>
+<tr>
+<td>C /epilogue</td>
+<td>K 循环结束后 C[32·bm + r,32·bn + c] = acc[t, v]</td>
+<td>C 的持有者唯一：acc = holders(C)[0]</td>
+<td>c_writes 全是 1；regs = {A: 4, B: 4, C: 8}</td>
+</tr>
+<tr>
+<td>wavefronts</td>
+<td>words = {b // 4}（去重）；max(max_bank |{w : w % 32 = bank}|, <code>⌈</code>4·|words| / 128<code>⌉</code>)；空输入为 0</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="a5-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ trace(5, 7, 3)：CTA (0,0)，第 0 个 K 片</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;CTA 与 K 片&quot;, &quot;s&quot;: &quot;(0,0)，k_tile 0&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;cp&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;copy&quot;, &quot;s&quot;: &quot;A：线程 20 的 v=3&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;SMEM&quot;, &quot;s&quot;: &quot;A：偏移 87&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;hold&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;MMA 持有者&quot;, &quot;s&quot;: &quot;(21,1), (85,1)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;累加器&quot;, &quot;s&quot;: &quot;(23, 1)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;cp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cp&quot;, &quot;b&quot;: &quot;sm&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;hold&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;hold&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 190.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 160.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="kt"><div class="step-title">1. 哪个 CTA、哪个 K 片</div><p><code>5 // 32 = 0</code>、<code>7 // 32 = 0</code>、<code>3 // 16 = 0</code>：CTA (0,0) 的第 0 个 K 片。A[5][3] 在 tile 内是 (5, 3)，B[7][3] 是 (7, 3)。</p>
 </div><div class="step" data-hl="kt,cp"><div class="step-title">2. 谁搬的</div><p>copy 的逆：行 5、列 3 由线程 <code>4·5 + 3//4 = 20</code> 的第 <code>3 % 4 = 3</code> 个值搬运。真实 CuTe 的 <code>partition_S</code> 给线程 5 的是 <code>(1,4) (1,5) (1,6) (1,7)</code>，和公式“行 t//4、列 4(t%4)+v”一致。B[7][3] 由线程 28 的 v=3 搬。</p>
@@ -312,19 +518,19 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="sm,hold"><div class="step-title">4. 谁把它读进寄存器</div><p>A 的 (5,3) 被线程 21 和 85 的第 1 个值持有（N 方向的两个 warp 都要这一行），B 的 (7,3) 被 29 和 61 持有（M 方向的两个 warp）。线程 5 的 MMA 读取的 SMEM 偏移是 <code>22 23 150 151 30 31 158 159</code>。</p>
 </div><div class="step" data-hl="hold,acc"><div class="step-title">5. 累加并写回</div><p>C 的 (5,7) 只由线程 23 的第 1 个累加器持有。CTA (0,0) 一共 <code>mma = 32</code> 条；<code>gmem_sectors = 256</code>（A、B 各 32×64 个 half = 4096 字节 = 128 个 sector，没有浪费）；<code>smem_store_wavefronts = 64</code>（每条 copy 指令 256 字节 = 2 个 wavefront，无冲突）；<code>smem_load_wavefronts = 256</code>（128 条 LDS，每条 2 个 wavefront：2 路冲突）。</p>
 </div></div></div>
-<h2 id="a5-5">易错点</h2>
+<h2 id="a5-7">易错点</h2>
 <ul>
 <li><strong>每个 K 片清零累加器。</strong> 结果只剩最后一个 K 片的贡献。测试 <code>test_simulated_gemm_is_correct</code>。</li>
 <li><strong>在 SMEM 用逻辑下标而不是 swizzle 后的偏移。</strong> 写和读必须用同一个 <code>smem_offset</code>，否则数值会错；如果写读都忘了 swizzle，数值对但 wavefront 计数不同。测试 <code>test_swizzle_222_does_not_help_loads_but_133_does</code>、<code>test_trace_agrees_with_real_partitions</code>。</li>
 <li><strong>wavefront 只数 bank 冲突。</strong> 一条指令读 256 字节时，即使没有冲突也至少 2 个 wavefront。测试 <code>test_wavefronts_count_bytes_not_only_conflicts</code>：<code>[(8i, 8) for i in range(32)]</code> 是 2。</li>
 <li><strong>以为 <code>Swizzle&lt;2,2,2&gt;</code> 消掉了所有冲突。</strong> 32×16 的 half tile 每行只有 32 字节，<code>Swizzle&lt;2,2,2&gt;</code> 只在 4 行内部打乱，第 r 行和第 r+4 行仍落在同一组 bank。</li>
 </ul>
-<h2 id="a5-6">对照文档</h2>
+<h2 id="a5-8">对照文档</h2>
 <blockquote>
 <p>“这些映射不是孤立的：Global tile 要由 Copy TV Layout 分配给线程；Copy 目标坐标要映射到 SMEM 地址；SMEM 中的数据要转成 MMA 所需的寄存器 fragment；MMA 输出分布最后还要转换成 Global C 的写回布局。”</p>
 </blockquote>
 <p>本题把这句话里的四次“转换”逐个执行。对文档 swizzle 的一个补充：在本题的 32 位 LDS 模型下，<code>Swizzle&lt;2,2,2&gt;</code> 和不 swizzle 都是 256 个 load wavefront；<code>Swizzle&lt;1,3,3&gt;</code>（用行号的第 2 位改 word 的第 2 位）才降到 128。swizzle 要和“读的人怎么读”一起设计，这正是 B2、C2 要用 layout 代数去检查的事情。</p>
-<h2 id="a5-7">上机验证</h2>
+<h2 id="a5-9">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/a5_assemble_gemm.cpp   # 真实 CuTe，本机编译运行
 ./check.sh oracle a5                                # 重新生成 tests/golden/a5_assemble_gemm.json
 </code></pre>
@@ -339,7 +545,7 @@ thread  23 accumulates C (5,6) (5,7) (13,6) (13,7) (5,22) (5,23) (13,22) (13,23)
 A(5,2) lives at smem offset 86 (Swizzle&lt;2,2,2&gt;)
 </code></pre>
 <p>线程 21 和 85 持有完全相同的 A 片段：它们是 N 方向两个 warp 里同一个 lane。搬运和持有是两张不同的表：线程 20 搬了第 5 行，但它在 MMA 里拿的是另一些元素。</p>
-<h2 id="a5-8">三级提示</h2>
+<h2 id="a5-10">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">wavefronts([(4 * i, 4) for i in range(32)])       # 1   每 lane 一个 bank
 wavefronts([(0, 4)] * 32)                         # 1   广播
@@ -377,7 +583,7 @@ trace(5, 7, 3)[&quot;C&quot;]                                                  #
 <li>Copy TV 是双射，<code>raked_product</code> 写出来的 <code>layout_mn</code> 本身就是它的逆（B1）；MMA 的 A、B 有复制，一个元素有两个持有者，没有唯一的逆，只能列举（或者在 TV 上做 right_inverse 得到“其中一个”持有者）。</li>
 </ol>
 </div></details></div></details>
-<h2 id="a5-9">参考解</h2>
+<h2 id="a5-11">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/a5_assemble_gemm.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a5_assemble_gemm.py</span><span class="muted small">289 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A5 · 把五个映射拼成一个完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，并统计访存与指令 — reference solution.
 
@@ -668,7 +874,7 @@ def trace(m: int, n: int, k: int) -&gt; dict:
     r, c = m - 32 * bm, n - 32 * bn
     out[&quot;C&quot;] = {&quot;tile&quot;: (r, c), &quot;acc&quot;: _holders(tiled_tv(&quot;C&quot;), r, c)[0]}
     return out</code></pre></div></div></details>
-<h2 id="a5-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="a5-12">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>真实 kernel 用 <code>cp.async</code> 把 gmem → smem 变成异步，并用多个 SMEM stage 让下一片的拷贝和这一片的 mma 重叠。对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L62">sgemm_sm80.cu</a> 里的 <code>cp_async_wait&lt;K_PIPE_MAX-2&gt;</code>：stage 数怎样影响 SMEM 用量？</li>
 <li>用 <code>ldmatrix</code> 代替 LDS.32 时，一条指令每 lane 读 16 字节，wavefront 模型怎样变？<code>Swizzle&lt;2,2,2&gt;</code> 在那种读法下是不是够用？（A3 已经回答了一半。）</li>
@@ -682,13 +888,21 @@ def trace(m: int, n: int, k: int) -&gt; dict:
 <a class="o2" href="#a5-1">题面速览</a>
 <a class="o2" href="#a5-2">直觉与类比</a>
 <a class="o2" href="#a5-3">图解：一个 K 片里数据走过的五层</a>
-<a class="o2" href="#a5-4">逐步演示</a>
-<a class="o2" href="#a5-5">易错点</a>
-<a class="o2" href="#a5-6">对照文档</a>
-<a class="o2" href="#a5-7">上机验证</a>
-<a class="o2" href="#a5-8">三级提示</a>
-<a class="o2" href="#a5-9">参考解</a>
-<a class="o2" href="#a5-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#a5-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#a5-5">图解详解：五个映射怎样拼成一个 GEMM</a>
+<a class="o3" href="#a5-5-1">图 1 · 一个 CTA 的 K 循环：四个阶段与四个计数器</a>
+<a class="o3" href="#a5-5-2">图 2 · gmem → smem 的 copy：一条指令碰几个 sector</a>
+<a class="o3" href="#a5-5-3">图 3 · SMEM 的 bank 视图：swizzle 之后写在哪、读的时候撞不撞</a>
+<a class="o3" href="#a5-5-4">图 4 · wavefronts(byte_ranges) ：两个下限取大</a>
+<a class="o3" href="#a5-5-5">图 5 · mma.sync 与累加器：寄存器怎样拼回矩阵，C 怎样只写一次</a>
+<a class="o3" href="#a5-5-6">速查：每一层的公式和计数</a>
+<a class="o2" href="#a5-6">逐步演示</a>
+<a class="o2" href="#a5-7">易错点</a>
+<a class="o2" href="#a5-8">对照文档</a>
+<a class="o2" href="#a5-9">上机验证</a>
+<a class="o2" href="#a5-10">三级提示</a>
+<a class="o2" href="#a5-11">参考解</a>
+<a class="o2" href="#a5-12">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

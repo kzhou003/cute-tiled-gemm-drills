@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">D2 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 60 分钟 · 难</div><h1>D2 · mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</h1><p class="lede">TMA 是异步的：指令发出去就返回，数据几百个周期后才落地。要让搬运和计算重叠，就得有 S 个 SMEM stage 轮流用，并且用屏障保证“没到的不读、没用完的不覆盖”。本题复刻 Hopper 的 mbarrier 语义和 CUTLASS 的 PipelineState / PipelineTmaAsync 协议（PipelineState 与真实 CUTLASS 逐步对拍），再用离散事件模拟主循环：算出 ceil(L/T)+1 这个 stage 数从哪来，并亲手造出死锁和数据竞争。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d2_mbarrier_pipeline.py"><code>mine/d2_mbarrier_pipeline.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d2_mbarrier_pipeline.py"><code>tests/test_d2_mbarrier_pipeline.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d2_mbarrier_pipeline.py"><code>solutions/d2_mbarrier_pipeline.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D2"> 我已完成这道题</label></header>
 <h2 id="d2-1">题面速览</h2>
@@ -305,14 +317,204 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="d2-3">图解：一个 stage 的生命周期</h2>
 
 <figure class="flow"><div class="flow-head">stage i 的两盏灯<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;stage i 的两盏灯&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;acq&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;producer_acquire&quot;, &quot;s&quot;: &quot;wait empty[i] (phase p)&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tx&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;arrive_and_expect_tx&quot;, &quot;s&quot;: &quot;full[i]: tx += bytes&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;land&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;TMA 落地&quot;, &quot;s&quot;: &quot;complete_tx → 完成&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;wait&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer_wait&quot;, &quot;s&quot;: &quot;wait full[i] (phase c)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;mma&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;MMA&quot;, &quot;s&quot;: &quot;T 个时间单位&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rel&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;consumer_release&quot;, &quot;s&quot;: &quot;empty[i].arrive&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;acq&quot;, &quot;b&quot;: &quot;tx&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tx&quot;, &quot;b&quot;: &quot;land&quot;, &quot;t&quot;: &quot;L&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: true, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;land&quot;, &quot;b&quot;: &quot;wait&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;wait&quot;, &quot;b&quot;: &quot;mma&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;mma&quot;, &quot;b&quot;: &quot;rel&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;rel&quot;, &quot;b&quot;: &quot;acq&quot;, &quot;t&quot;: &quot;下一轮&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 230.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 190.0}}"></div><figcaption>一个 stage 从发出 TMA 到可以再用，至少要 L + T。S 个 stage 轮转，所以每 (L + T) / S 才能开始一块新的；同时 MMA 本身每块要 T。两者取大就是稳态间隔。</figcaption></figure>
-<h2 id="d2-4">逐步演示</h2>
+<h2 id="d2-4">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 S = 4、L = 700。拿一个小到每个事件都能写出来的例子：2 个 stage、5 块、TMA 延迟 L = 3、MMA 时间 T = 2。把每一块用哪个 stage、生产者和消费者各等哪个奇偶、每个 barrier 完成了几次，一行一行写在纸上，规律就清楚了。然后再放大到测试的 S = 4、K = 8，最后写成一般公式。</p>
+<p>① 小：S=2, K=5, L=3, T=2</p>
+<p>一共 28 个事件，每个都能手写。L &gt; T，2 个 stage 藏不住延迟，消费者每轮空等 1。</p>
+<pre><code>mma_start = [3, 5, 8, 10, 13]，total =
+15
+稳态 2.5 = (3+2)/2 &gt; T = 2
+min_stages(3, 2) = ceil(1.5) + 1 = 3
+</code></pre>
+<p>② 测试：S=4, K=8, L=700, T=200</p>
+<p>和 ① 同一个递推，只是数字变大。</p>
+<pre><code>load_issue = [0,0,0,0,
+900,1100,1300,1500]
+mma_start  = [700,900,1100,1300,
+1600,…,2200]
+total = 2400，稳态 225，min_stages = 5
+</code></pre>
+<p>③ 写错的协议（仍用 ①）</p>
+<p>每种 bug 在哪一刻、哪个 barrier 上出事：</p>
+<pre><code>P 起点 phase 0 → t=0 死锁
+C 起点 phase 1 → t=0 读空 stage 0
+不 release     → t=7 死锁
+跳过 acquire   → t=0 tile 2 覆盖 stage 0
+</code></pre>
+<p>④ 一般</p>
+<p>把 ① 的表格抽象出来：</p>
+<pre><code>index = k % S，轮次 r = k // S
+消费者 phase = r % 2，生产者 phase = 1 − r
+% 2
+issue[k] = 0 (k&lt;S) 或 mma_end[k−S]
+mma_start[k] = max(issue[k]+L,
+mma_end[k−1])
+</code></pre>
+<p><strong>✎</strong> 草稿纸：S = 2，K = 5，L = 3，T = 2（同一时刻生产者先走）</p>
+<pre><code class="language-text">1) 每块用哪个 stage、等哪个奇偶      index = k % 2，轮次 r = k // 2
+   k                      0      1      2      3      4
+   index = k % 2          0      1      0      1      0
+   r = k // 2             0      0      1      1      2
+   生产者 (index, phase)  (0,1)  (1,1)  (0,0)  (1,0)  (0,1)    ← 起点 (0,1)：phase = 1 − r%2
+   消费者 (index, phase)  (0,0)  (1,0)  (0,1)  (1,1)  (0,0)    ← 起点 (0,0)：phase =
+r%2
+   → 同一块上两者的 phase 永远相反：生产者等“上一轮被吃完”，消费者等“这一轮被装好”
+2) 新 barrier：completed = 0，try_wait(p) = (completed % 2 != p)
+   try_wait(1) = (0 != 1) = True      try_wait(0) = (0 != 0) = False
+3) 逐个时刻（括号里是 barrier 的 completed 数）
+   t=0   P k=0  empty[0].try_wait(1) = (0≠1) ✓ → full[0]: tx += 1024, arrive → 发
+TMA，t=3 落地
+         P k=1  empty[1].try_wait(1) ✓ → 发 TMA，t=3 落地
+         P k=2  empty[0].try_wait(0) = (0≠0) ✗  阻塞
+         C k=0  full[0].try_wait(0)：arrive 到了但 tx = 1024 ≠ 0，phase 未完成 ✗  阻塞
+   t=3   TMA 落地：full[0] (1)、full[1] (1)
+         C k=0  full[0].try_wait(0) = (1≠0) ✓ → MMA [3, 5)
+   t=5   C 算完 0 → release：empty[0] (1)
+         C k=1  full[1].try_wait(0) ✓ → MMA [5, 7)
+         P k=2  empty[0].try_wait(0) = (1≠0) ✓ → 发 TMA，t=8 落地
+         P k=3  empty[1].try_wait(0) = (0≠0) ✗  阻塞
+   t=7   C 算完 1 → release：empty[1] (1)
+         C k=2  full[0].try_wait(1) = (1≠1) ✗  阻塞      ← tile 2 还在路上，空等 1
+         P k=3  empty[1].try_wait(0) ✓ → 发 TMA，t=10 落地
+         P k=4  empty[0].try_wait(1) = (1≠1) ✗  阻塞
+   t=8   TMA 落地：full[0] (2)   C k=2  full[0].try_wait(1) = (0≠1) ✓ → MMA [8, 10)
+   t=10  TMA 落地：full[1] (2)；C 算完 2 → release：empty[0] (2)
+         C k=3  full[1].try_wait(1) ✓ → MMA [10, 12)
+         P k=4  empty[0].try_wait(1) = (0≠1) ✓ → 发 TMA，t=13 落地；生产者结束
+   t=12  C 算完 3 → release：empty[1] (2)；C k=4  full[0].try_wait(0) = (2%2≠0) ✗  阻塞 ← 又空等 1
+   t=13  TMA 落地：full[0] (3)   C k=4 ✓ → MMA [13, 15)
+   t=15  C 算完 4 → release：empty[0] (3)。结束
+4) 结果
+   load_issue = [0, 0, 5, 7, 10]
+   load_done  = [3, 3, 8, 10, 13]          = load_issue + 3
+   mma_start  = [3, 5, 8, 10, 13]          = max(load_done[k], mma_end[k−1])
+   mma_end    = [5, 7, 10, 12, 15]         total = 15
+   steady_interval = (mma_end[4] − mma_end[2]) / S = (15 − 10) / 2 = 2.5
+   predicted_interval(2, 3, 2) = max(2, (3+2)/2) = 2.5 ✓        min_stages(3, 2) =
+ceil(3/2) + 1 = 3
+5) 抽象成递推（没有 bug 时，和模拟逐块相同）
+   load_issue[k] = 0                  (k &lt; S，空 buffer 直接装)
+                 = mma_end[k − S]     (k ≥ S，等同一个 stage 的上一块被 release)
+   load_done[k]  = load_issue[k] + L
+   mma_start[k]  = max(load_done[k], mma_end[k − 1])
+   mma_end[k]    = mma_start[k] + T
+   同一个 stage 的两次装填间隔 = L + T（落地 L，算 T），S 个 stage 轮流 → 每块 (L+T)/S；MMA 本身每块 T → 取大
+</code></pre>
+<p>下面这张图可以任意改 S、K、L、T。每个 stage 一条泳道：蓝色深 = TMA 在路上（<code>T2</code> 表示第 2 块），蓝色浅 = 数据到了、等消费者，绿色 = MMA（<code>M2</code> ）。泳道下面两条细带是这个 stage 的 <code>full[i]</code> 和 <code>empty[i]</code> ：数字是已完成的 phase 数，颜色深浅是它的奇偶，竖线就是“phase 翻转”的时刻。灰色斜线是生产者或消费者在等。默认参数就是上面的草稿纸，对照着看；把 S 拖到 3，空等就消失了。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 小尺寸主循环时间线</div><img src="../figs/d2/d2_new-01.png" alt="手算草稿 · 小尺寸主循环时间线" loading="lazy" style="width:100%;aspect-ratio:1461/1153"></figure>
+<h2 id="d2-5">图解详解：屏障、状态机与主循环</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>前面的流程图只给了结构。这一节按“从下往上”的顺序画四张可交互的图：先是一个 mbarrier 本身（图 1），再是生产者 / 消费者各自手里的 PipelineState（图 2），然后把它们拼成主循环，一步一步走事件，并且可以注入每一种 bug 看它在哪里断掉（图 3），最后看 stage 数怎样决定吞吐（图 4）。</p>
+<p>整道题对应的就是下面这段 CUTLASS 主循环的骨架（简化自 <code>sm90_mma_tma_gmma_ss_warpspecialized.hpp</code> 的 load /mma 两个函数）：</p>
+<pre><code>// 生产者 warp（发 TMA）                         // 消费者 warp group（做 MMA）
+auto wr = make_producer_start_state&lt;P&gt;();  // (0,1,0)    PipelineState rd;           // (0
+for (k = 0; k &lt; K; ++k) {                                for (k = 0; k &lt; K; ++k) {
+  pipeline.producer_acquire(wr);  // 等 empty[i]·phase       pipeline.consumer_wait(rd);
+                                  // + full[i] expect_tx      mma(smem[rd.index()]);
+  copy(tma.with(*full[i]), gA(k), sA(wr.index()));            pipeline.consumer_release(rd
+  ++wr;                           // 图 2                     ++rd;
+}                                                        }
+</code></pre>
+<h3 id="d2-5-1">图 1 · 一个 mbarrier：arrive、tx 字节与 phase 奇偶</h3>
+<p>一个 mbarrier 只有三个数：还差几次 arrive（<code>pending</code> ）、还差多少字节（<code>tx</code> ）、已经完成了几个 phase（<code>completed</code> ）。两个都归零的那一刻，当前 phase 完成，<code>completed + 1</code> ，<code>pending</code> 重置。等待方只给 1 位 parity：<code>try_wait(p)</code> 问的是“奇偶为 p 的那个 phase 完成了吗”，规则是 <code>completed % 2 != p</code> 。点按钮自己操作，看三格计数和下面的 phase 条怎样变化；试试“先 arrive 再 expect_tx”为什么会让 phase 提前完成。</p>
+
+<figure class="flow snap"><div class="flow-head">MBarrier(arrive_count) 的状态机</div><img src="../figs/d2/d2_new-02.png" alt="MBarrier(arrive_count) 的状态机" loading="lazy" style="width:100%;aspect-ratio:1461/974"></figure>
+<p>源码对照：<code>try_wait</code> 就是一条 <code>mbarrier.try_wait.parity</code> ，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L468-L490">ClusterBarrier::try_wait</a> ；</p>
+<p><code>arrive_and_expect_tx</code> 是一条 <code>mbarrier.arrive.expect_tx</code> ，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L624-L639">ClusterTransactionBarrier::arrive_and_expect_tx</a> ；初始化 <code>mbarrier.init</code> 见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L399-L414">ClusterBarrier::init</a> 。语义的权威定义在 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier">mbarrier 一节</a>（phase、pending arrival count、tx-count 的定义）和 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-test-wait-try-wait">mbarrier.test_wait / try_wait</a>（<code>.parity</code> 变体）。</p>
+<h3 id="d2-5-2">图 2 · PipelineState：index 绕圈、phase 翻转</h3>
+<p>PipelineState 只是三个整数 <code>(index, phase, count)</code> 。每 <code>++</code> 一次：index + 1；index 到 S 就回 0，同时 phase 翻转。所以 phase 就是“已经绕了几圈”的奇偶。下面的格子横轴是 count（第几块），三行分别是 index、消费者的 phase（起点 0）、生产者的 phase（起点 1）。拖 S、点 ++ 或 advance(n)，看高亮列怎样移动，第三行永远是第二行取反。</p>
+
+<figure class="flow snap"><div class="flow-head">PipelineState&lt;S> 的 increment / advance</div><img src="../figs/d2/d2_new-03.png" alt="PipelineState&lt;S> 的 increment / advance" loading="lazy" style="width:100%;aspect-ratio:1461/713"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L203-L217">PipelineState::operator++</a> （<code>Stages == 1</code> 单独一支：只翻转 phase）、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L232-L248">PipelineState::advance</a> （用 <code>(index + n) / Stages</code> 的奇偶决定是否翻转）、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L270-L278">make_producer_start_state</a> 。</p>
+<h3 id="d2-5-3">图 3 · 主循环逐事件走一遍，并注入 bug</h3>
+<p>这是整道题的核心：生产者和消费者各拿一个 PipelineState，共享 2S 个 mbarrier。用 ◀ ▶ 或“播放”一步一步走事件日志，蓝色竖线是当前时刻（右边还没发生的部分被盖住）。下方面板打印这一刻每个 barrier 的三个数、两个 PipelineState，以及它们下一步要做的 <code>try_wait</code> 代入结果。</p>
+<p>然后切换上面的 bug 按钮，看协议在哪里断掉：</p>
+<ul>
+<li>producer phase 0：生产者等 empty[0] 的 phase 0，可没人会让它完成（消费者在等 full[0]）。t = 0 两边都卡死。</li>
+<li>consumer phase 1：新 barrier 上 <code>try_wait(1)</code> 立即为真，消费者在 TMA 落地前就去读 stage 0。</li>
+<li>不 release：前 S 块正常；第 S+1 块的生产者等 empty[0] 永远不翻转。K ≤ S 时这个 bug 看不出来。</li>
+<li>跳过 acquire：生产者不看 empty，绕完一圈直接往还在用的 stage 0 发 TMA。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">PipelineTmaAsync 主循环 · 事件日志</div><img src="../figs/d2/d2_new-04.png" alt="PipelineTmaAsync 主循环 · 事件日志" loading="lazy" style="width:100%;aspect-ratio:1461/1251"></figure>
+<p>源码对照：四个调用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L529-L546">producer_acquire</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L628-L632">consumer_wait</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L645-L654">consumer_release</a> ；真实生产者循环（acquire → 拿 full barrier 交给 TMA → <code>++smem_pipe_write</code> ）见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L370-L390">collective 的 load 循环</a>。生产者退出前还要调用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L463-L472">producer_tail</a> 把最后 S 个 empty 等完，防止 cluster 里别的 CTA 还在往它的 SMEM 写（本题不建模）。CUTLASS 自己的说明见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/pipeline.md">CUTLASS pipeline 文档</a>。</p>
+<h3 id="d2-5-4">图 4 · stage 数与稳态间隔：<code>predicted_interval</code> / <code>min_stages</code></h3>
+<p>每根柱子是 <code>simulate(S, 40, L, T)</code> 实测的稳态间隔，虚线是 T（MMA 本身的下限），圆点是公式 <code>(L + T) / S</code> 。柱子先按 1/S 下降，碰到 T 就不再下降：第一个碰到 T 的 S 就是 <code>min_stages = ceil(L/T) + 1</code> （描边的那根）。默认是测试用的 L = 700、T = 200。</p>
+
+<figure class="flow snap"><div class="flow-head">稳态间隔 = max(T, (L+T)/S)</div><img src="../figs/d2/d2_new-05.png" alt="稳态间隔 = max(T, (L+T)/S)" loading="lazy" style="width:100%;aspect-ratio:1461/882"></figure>
+<h3 id="d2-5-5">速查</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>对象 / 函数</th>
+<th>规则</th>
+<th>小例子 S=2, L=3, T=2</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MBarrier.try_wait(p)</code></td>
+<td><code>completed % 2 != p</code> ；phase 完成 ⇔pending = 0 且 tx = 0</td>
+<td>新 barrier：try_wait(1)=True,try_wait(0)=False</td>
+</tr>
+<tr>
+<td><code>arrive_and_expect_tx(b)</code></td>
+<td>先 <code>tx += b</code> ，再 arrive</td>
+<td>full[0]：pending 0，tx 1024 → 未完成</td>
+</tr>
+<tr>
+<td><code>PipelineState. increment</code></td>
+<td>index+1，到 S 回 0 并翻转 phase；S=1 每次翻转</td>
+<td>生产者 (0,1)→(1,1)→(0,0)→(1,0)→(0,1)</td>
+</tr>
+<tr>
+<td><code>advance(n)</code></td>
+<td><code>(index+n)//S</code> 为奇数则翻转；<code>index= (index+n)%S</code></td>
+<td>(1,1).advance(3)：4//2=2 偶 → (0,1)</td>
+</tr>
+<tr>
+<td>第 k 块</td>
+<td>index = k%S；消费者 phase = r%2；生产者 phase = 1−r%2（r = k//S）</td>
+<td>k=4：index 0，r=2 → C 等 0，P 等 1</td>
+</tr>
+<tr>
+<td><code>load_issue[k]</code></td>
+<td>0（k&lt;S），否则 mma_end[k−S]</td>
+<td>[0, 0, 5, 7, 10]</td>
+</tr>
+<tr>
+<td><code>mma_start[k]</code></td>
+<td>max(load_issue[k]+L, mma_end[k−1])</td>
+<td>[3, 5, 8, 10, 13]</td>
+</tr>
+<tr>
+<td><code>predicted_interval</code></td>
+<td>max(T, (L+T)/S)</td>
+<td>max(2, 2.5) = 2.5</td>
+</tr>
+<tr>
+<td><code>min_stages</code></td>
+<td>ceil(L/T) + 1</td>
+<td>ceil(1.5)+1 = 3</td>
+</tr>
+<tr>
+<td>bug → 错误</td>
+<td>producer phase 0 / 不 release → DeadlockError；consumer phase 1 / 跳过 acquire → RaceError</td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="d2-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ S = 4，L = 700，T = 200，K = 8：四个 stage 藏不住 700 的延迟</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;fill&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;填满&quot;, &quot;s&quot;: &quot;t=0 发 4 块&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;go&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;开算&quot;, &quot;s&quot;: &quot;t=700..1500&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;stuck&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;卡住&quot;, &quot;s&quot;: &quot;t=900 才放出 stage 0&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;稳态&quot;, &quot;s&quot;: &quot;225 / 块&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;fill&quot;, &quot;b&quot;: &quot;go&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;go&quot;, &quot;b&quot;: &quot;stuck&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;stuck&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="fill"><div class="step-title">1. t = 0：生产者一口气发 4 块</div><p>生产者起点 <code>(0, 1, 0)</code>：在新的 empty barrier 上 <code>try_wait(1)</code> 立即为真。四个 stage 都通过，<code>load_issue = [0, 0, 0, 0, …]</code>。第 5 块要等 stage 0 的第 1 轮（<code>producer_start_state(4)</code> 增加 4 次后是 <code>(0, 0, 4)</code>）。</p>
 </div><div class="step" data-hl="fill,go"><div class="step-title">2. t = 700：数据落地，消费者开算</div><p>四块同时在 700 落地。消费者按 0、1、2、3 依次计算：<code>mma_start = [700, 900, 1100, 1300]</code>。</p>
 </div><div class="step" data-hl="go,stuck"><div class="step-title">3. t = 900：stage 0 释放，第 5 块才发出</div><p>第 0 块在 900 算完并 release，生产者马上发第 5 块，700 之后（1600）才落地。消费者在 1500 算完第 3 块后空等 100。<code>load_issue[4:] = [900, 1100, 1300, 1500]</code>，<code>load_done[4:] = [1600, 1800, 2000, 2200]</code>。</p>
 </div><div class="step" data-hl="stuck,st"><div class="step-title">4. 稳态</div><p><code>total = 2400</code>，最后 4 块的平均间隔 <code>225 = (700 + 200) / 4 &gt; 200</code>。S = 1..6 的稳态间隔是 900、450、300、225、200、200：要完全藏住延迟需要 <code>min_stages(700, 200) = ceil(3.5) + 1 = 5</code> 个 stage。</p>
 </div></div></div>
-<h2 id="d2-5">易错点</h2>
+<h2 id="d2-7">易错点</h2>
 <ul>
 <li><strong>生产者从 phase 0 起步。</strong> 新 barrier 的 phase 0 还没完成，生产者等 <code>empty[0]</code> 的 phase 0，消费者等 <code>full[0]</code>，谁也不动：t = 0 死锁（<code>producer waits empty[0] parity 0; consumer waits full[0] parity 0</code>）。测试 <code>test_bug_producer_phase0_deadlocks</code>。</li>
 <li><strong>消费者从 phase 1 起步。</strong> 新 barrier 上 <code>try_wait(1)</code> 立即为真，消费者读到还没写的 stage：<code>consumer reads stage 0 for tile 0 but it holds None</code>。测试 <code>test_bug_consumer_phase1_reads_dirty_data</code>。</li>
@@ -321,12 +523,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>先 arrive 再 expect_tx。</strong> arrive 的那一刻 tx 还是 0，phase 立刻完成，消费者会提前读。<code>arrive_and_expect_tx</code> 必须先加字节再 arrive。测试 <code>test_expect_tx_before_arrive</code>。</li>
 <li><strong>S = 1 时 index 不动。</strong> CUTLASS 对 <code>Stages == 1</code> 单独处理：每次 ++ 都翻转 phase。测试 <code>test_single_stage_flips_every_step</code> 和真实 CUTLASS 的 <code>consumer_1</code> 序列。</li>
 </ul>
-<h2 id="d2-6">对照文档</h2>
+<h2 id="d2-8">对照文档</h2>
 <blockquote>
 <p>“多 stage pipeline 会用多个 shared-memory buffer：计算当前 stage 时，producer 预取后续 stage；consumer 在确认数据 ready 后再消费；stage 被用完后才能释放并复用……同步协议保证不会读到未完成的数据，也不会覆盖仍在使用的 buffer。”</p>
 </blockquote>
 <p>文档里的 <code>issue_load / wait_until_ready / release_stage</code> 三个伪代码调用，在 CUTLASS 里分别是 <code>producer_acquire</code>（加上 TMA 发射）、<code>consumer_wait</code>、<code>consumer_release</code>。本题补上了文档没有展开的部分：ready / empty 用什么表示（mbarrier 的 phase 奇偶），以及“保证不会读到 / 不会覆盖”在协议写错时具体怎样失效。</p>
-<h2 id="d2-7">真实代码</h2>
+<h2 id="d2-9">真实代码</h2>
 <p>生产者和消费者的四个调用（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L289">PipelineTmaAsync</a>）：</p>
 <pre><code class="language-cpp">void producer_acquire(uint32_t stage, uint32_t phase) {
   empty_barrier_ptr_[stage].wait(phase);
@@ -347,7 +549,28 @@ void consumer_release(uint32_t stage) { empty_barrier_ptr_[stage].arrive(dst_blo
 <pre><code class="language-cpp">// Producer starts with an opposite phase as the buffers are initially empty
 return {/*index*/ 0, /*phase*/ 1, /*count*/ 0};
 </code></pre>
-<h2 id="d2-8">上机验证</h2>
+<h2 id="d2-10">真实代码</h2>
+<p>生产者和消费者的四个调用，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L530-L660">PipelineTmaAsync</a> ：</p>
+<pre><code>void producer_acquire(uint32_t stage, uint32_t phase) {
+  empty_barrier_ptr_[stage].wait(phase);
+  if (params_.is_leader)
+    full_barrier_ptr_[stage].arrive_and_expect_tx(params_.transaction_bytes);
+}
+void producer_commit(uint32_t stage, uint32_t bytes) { }   // NOP for TMA: 硬件自己 complet
+void consumer_wait(uint32_t stage, uint32_t phase) { full_barrier_ptr_[stage].wait(phase)
+void consumer_release(uint32_t stage) { empty_barrier_ptr_[stage].arrive(dst_blockid_, is_
+</code></pre>
+<p><code>wait</code> 就是一个 <code>try_wait.parity</code> 的自旋循环，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/barrier.h#L416-L440">ClusterBarrier::wait</a> ：</p>
+<pre><code>&quot;LAB_WAIT: \n\t&quot;
+&quot;mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1, %2; \n\t&quot;
+&quot;@P1 bra DONE; \n\t&quot;
+&quot;bra     LAB_WAIT; \n\t&quot;
+</code></pre>
+<p>生产者的起点，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L270-L278">make_producer_start_state</a> ：</p>
+<pre><code>// Producer starts with an opposite phase as the buffers are initially empty
+return {/*index*/ 0, /*phase*/ 1, /*count*/ 0};
+</code></pre>
+<h2 id="d2-11">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/d2_mbarrier_pipeline.cpp   # 真实 cutlass::PipelineState，在主机上编译
 ./check.sh oracle d2                                    # 重新生成 tests/golden/d2_mbarrier_pipeline.json
 </code></pre>
@@ -360,7 +583,7 @@ return {/*index*/ 0, /*phase*/ 1, /*count*/ 0};
 PipelineState&lt;4&gt;(2,1,0).advance(13) = (3,0,13)
 </code></pre>
 <p>生产者和消费者在同一个 index 上的 phase 永远相反：生产者等“上一轮被吃完”，消费者等“这一轮被装好”。<code>PipelineState</code> 只是整数记账，所以 oracle 只需把头文件引用的 <code>threadIdx</code>、<code>__syncthreads</code> 在主机上补一个空定义就能编译。mbarrier 本身是 PTX 指令，CPU 上跑不了，本题按 PTX ISA 的语义建模；真正的时序要在 Hopper 或更新的 GPU 上测（本机没有，未核对）。</p>
-<h2 id="d2-9">三级提示</h2>
+<h2 id="d2-12">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">b = MBarrier(1); b.try_wait(1), b.try_wait(0)         # (True, False)
 b.arrive_and_expect_tx(1024); b.try_wait(0)           # False：字节还没到
@@ -398,7 +621,7 @@ min_stages(700, 200)                                   # 5
 <li>一个 stage 的周期是 L + T（落地 L，再被算 T 才释放），S 个 stage 轮转，稳态间隔 <code>(L + T) / S</code>。要它 ≤ T，需要 <code>S ≥ L/T + 1</code>，取整得 <code>ceil(L/T) + 1</code>。多出来的那 1 个是“正在被 MMA 占用”的 stage：它在算的时候不能同时在搬。</li>
 </ol>
 </div></details></div></details>
-<h2 id="d2-10">参考解</h2>
+<h2 id="d2-13">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/d2_mbarrier_pipeline.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d2_mbarrier_pipeline.py</span><span class="muted small">253 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D2 · mbarrier 多级流水线：phase 奇偶、expect_tx、PipelineState，以及会死锁 / 会读脏数据的写法 — reference solution.
 
@@ -653,7 +876,7 @@ def predicted_interval(stages: int, load_latency: float, mma_time: float) -&gt; 
 
 def min_stages(load_latency: float, mma_time: float) -&gt; int:
     return math.ceil(load_latency / mma_time) + 1</code></pre></div></div></details>
-<h2 id="d2-11">面试官追问 &amp; 对照源码</h2>
+<h2 id="d2-14">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>cluster 里 multicast 时，一个 stage 的 empty barrier 要等几个 consumer arrive？对照 <code>PipelineTmaAsync</code> 构造函数里的 <code>multicast_consumer_arrival_count</code> 和 <code>dst_blockid_</code>。</li>
 <li>消费者的 <code>consumer_release</code> 放在 MMA 发射之后还是 MMA 完成之后？WGMMA 是异步的：CUTLASS 主循环为什么把 release 推迟一拍，配合 <code>warpgroup_wait&lt;K&gt;</code>？对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L417">collective mma</a> 循环。</li>
@@ -667,14 +890,22 @@ def min_stages(load_latency: float, mma_time: float) -&gt; int:
 <a class="o2" href="#d2-1">题面速览</a>
 <a class="o2" href="#d2-2">直觉与类比</a>
 <a class="o2" href="#d2-3">图解：一个 stage 的生命周期</a>
-<a class="o2" href="#d2-4">逐步演示</a>
-<a class="o2" href="#d2-5">易错点</a>
-<a class="o2" href="#d2-6">对照文档</a>
-<a class="o2" href="#d2-7">真实代码</a>
-<a class="o2" href="#d2-8">上机验证</a>
-<a class="o2" href="#d2-9">三级提示</a>
-<a class="o2" href="#d2-10">参考解</a>
-<a class="o2" href="#d2-11">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#d2-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#d2-5">图解详解：屏障、状态机与主循环</a>
+<a class="o3" href="#d2-5-1">图 1 · 一个 mbarrier：arrive、tx 字节与 phase 奇偶</a>
+<a class="o3" href="#d2-5-2">图 2 · PipelineState：index 绕圈、phase 翻转</a>
+<a class="o3" href="#d2-5-3">图 3 · 主循环逐事件走一遍，并注入 bug</a>
+<a class="o3" href="#d2-5-4">图 4 · stage 数与稳态间隔：predicted_interval / min_stages</a>
+<a class="o3" href="#d2-5-5">速查</a>
+<a class="o2" href="#d2-6">逐步演示</a>
+<a class="o2" href="#d2-7">易错点</a>
+<a class="o2" href="#d2-8">对照文档</a>
+<a class="o2" href="#d2-9">真实代码</a>
+<a class="o2" href="#d2-10">真实代码</a>
+<a class="o2" href="#d2-11">上机验证</a>
+<a class="o2" href="#d2-12">三级提示</a>
+<a class="o2" href="#d2-13">参考解</a>
+<a class="o2" href="#d2-14">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

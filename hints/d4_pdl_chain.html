@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3 cur" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">D4 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 55 分钟 · 中</div><h1>D4 · PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</h1><p class="lede">两个串联的 GEMM（H = X·W1，Y = H·W2）之间有一段只因为“前一个 kernel 还没结束”而空着的时间。PDL 让第二个 kernel 提前启动、先做和 H 无关的事，读 H 之前再等。本题把这条时间线算出来，并写一个检查器：trigger 放哪只影响快慢，wait 放哪决定对错。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d4_pdl_chain.py"><code>mine/d4_pdl_chain.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d4_pdl_chain.py"><code>tests/test_d4_pdl_chain.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d4_pdl_chain.py"><code>solutions/d4_pdl_chain.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D4"> 我已完成这道题</label></header>
 <h2 id="d4-1">题面速览</h2>
@@ -313,7 +325,222 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="d4-4">图解：四种 mode 的时间关系</h2>
 
 <figure class="flow"><div class="flow-head">gemm1 → gemm2 的起点与等待<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;gemm1 → gemm2 的起点与等待&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;g1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;gemm1&quot;, &quot;s&quot;: &quot;2 + 20 + 4 = 26 µs&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;trg&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;trigger&quot;, &quot;s&quot;: &quot;mainloop 之后：22 µs&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;end&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;前驱结束&quot;, &quot;s&quot;: &quot;26 µs（+0.5 flush）&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;gemm2 启动&quot;, &quot;s&quot;: &quot;PDL：22 + 0.5&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;wait 返回&quot;, &quot;s&quot;: &quot;max(t, 26.5)&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ml&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;读 H 的 mainloop&quot;, &quot;s&quot;: &quot;wait 之后&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;g1&quot;, &quot;b&quot;: &quot;trg&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;g1&quot;, &quot;b&quot;: &quot;end&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;trg&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;end&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;st&quot;, &quot;b&quot;: &quot;ml&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;ml&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 176.0}}"></div><figcaption>起点只由 trigger 决定，wait 只由前驱结束决定。正确性来自下面那条线；trigger 那条线只决定能藏住多少 setup 和预取。</figcaption></figure>
-<h2 id="d4-5">逐步演示</h2>
+<h2 id="d4-5">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 26 µs、25 µs 这些数字。拿一个每段时长都是 1、2、4 这种小整数的例子手算一遍：两条时间线、七个 phase，每个起止时刻都能写在纸上。规则清楚以后放大到测试的运行例子，再看两个边界情况，最后写成一般公式。你自己推这道题时，草稿纸上画的就是下面这种“两行时间轴”。</p>
+<p>① 小：gemm1 = 1+4+2，gemm2 = 1+2+3+1 每个 phase 只有 1–4 µs，七个起止时刻都能手算。</p>
+<pre><code>trigger @5 → gemm2 从 5.5 开始
+wait 返回 max(8.5, 7.5) = 8.5
+stream 17 · pdl 12.5 · ×1.36
+</code></pre>
+<p>② 测试例子：gemm1 = 2+20+4，gemm2 = 2+5+15+3 <code>two_gemm_chain()</code> ，结构和 ① 一模一样，只是数字变大。</p>
+<pre><code>trigger @22 → gemm2 从 22.5 开始
+wait 返回 max(29.5, 26.5) = 29.5
+stream 54 · graph 52 · pdl 47.5
+</code></pre>
+<p>③ 边界：epilogue 拉长到 30 / contention</p>
+<p>wait 等的是“前驱结束”，不是 trigger；提前启动有代价。</p>
+<pre><code>epi 30：wait 返回 52 + 0.5 = 52.5
+c=0.5：best (0,44.5) → (1,47.5)
+无 wait：报 mainloop reads H
+</code></pre>
+<p>④ 一般</p>
+<p>把 ①–③ 里反复出现的模式写成公式。</p>
+<pre><code>start₁ = start₀ + t_trig + 0.5
+  （无 trigger：end₀ + gap）
+wait 返回 = E + 0.5（E 含 c·o）
+正确 ⇔ wait 前不读 p.W
+       且不写 p.R ∪ p.W
+</code></pre>
+<p><strong>✎</strong> 草稿纸：小例子（常量 STREAM_GAP 3 · GRAPH_GAP 1 · PDL_LAUNCH 0.5 · FLUSH 0.5）</p>
+<pre><code class="language-text">gemm1：setup 1 → mainloop 4（读 X, W1）→ epilogue 2（写 H）              trigger_after = 1
+gemm2：setup 1 → prefetch_w2 2（读 W2）→ mainloop 3（读 H, W2）→ epilogue 1（写 Y）
+wait_before = 2
+1) kernel_time(gemm1) = 1+4+2 = 7          kernel_time(gemm2) = 1+2+3+1 = 7
+   trigger_time(gemm1) = phase 0..1 之和 = 1+4 = 5      trigger_time(gemm2) = 7（没有 trigger → 等于 kernel_time）
+2) stream  ：gemm2.start = end₀ + 3 = 7+3 = 10     spans = [(0, 7), (10, 17)]   total = 17.0
+   graph   ：gemm2.start = end₀ + 1 = 7+1 = 8      spans = [(0, 7), (8, 15)]    total = 15.0
+             （这两种 mode 完全不看 trigger_after / wait_before）
+3) pdl     ：gemm2.start = start₀ + trigger_time + 0.5 = 0+5+0.5 = 5.5
+   0 时刻 ──────────── 5 trigger ── 7 gemm1 结束 ── 7.5 wait 可返回
+   gemm2   setup        5.5 → 6.5
+           prefetch_w2  6.5 → 8.5          ← 读 W2，和 gemm1 无关，可以在 wait 之前做
+           [wait]       t = max(8.5, end₀ + 0.5) = max(8.5, 7.5) = 8.5   没有空等
+           mainloop     8.5 → 11.5         ← 读 H，必须在 wait 之后
+           epilogue    11.5 → 12.5         total = 12.5
+   graph_pdl：同样 12.5（有 trigger 时 gap 不出现）    speedup(stream→pdl) = 17/12.5 = 1.36
+4) wait 放得更早：
+   wait_before = 1：prefetch 起点 max(6.5, 7.5) = 7.5   空等 1    → … total = 13.5
+   wait_before = 0：setup    起点 max(5.5, 7.5) = 7.5   空等 2    → … total = 14.5
+5) check：gemm1.writes = {H}      gemm1.reads ∪ writes = {X, W1, H}
+   wait_before = 2：wait 之前是 setup{}、prefetch{读 W2}    W2 ∉ {H}             → []
+   wait_before = 3 / 4 / None：mainloop 读 H 在 wait 之前    H ∈ {H}  → ['read-before- wait: gemm2.mainloop reads H']
+   ⚠ wait_before = 3 时 mainloop 实际从 8.5 开始，比 gemm1 结束（7）还晚——这次“碰巧”读对了，
+     但硬件不保证 gemm1 的写入已可见，所以 check 照样报错：check 只看“在不在 wait 之前”，不看时刻。
+6) independent_operands = gemm2.reads − gemm1.writes = {W2, H} − {H} = ['W2']
+   latest_wait = 第一个碰 gemm1 数据的 phase = mainloop 的序号 = 2
+7) best_trigger（枚举 gemm1 的 trigger_after = 0, 1, 2）
+   ta=0：start 1+0.5 = 1.5；setup 1.5–2.5，prefetch 2.5–4.5，wait max(4.5, 7.5) = 7.5， mainloop 7.5–10.5，epi → 11.5
+   ta=1：12.5（见 3）
+   ta=2：trigger @7 → start 7.5，后面不再等 → 7.5+7 = 14.5
+   contention = 0   → (0, 11.5)
+   contention = 0.5：
+     ta=0：wait 前的名义区间 [1.5, 1.5+1+2) = [1.5, 4.5)，o = min(7, 4.5) − 1.5 = 3
+           gemm1 结束 E = 7 + 0.5·3 = 8.5，wait 返回 9.0 → mainloop 9–12，epi 12–13 → 13.0
+     ta=1：区间 [5.5, 8.5)，o = min(7, 8.5) − 5.5 = 1.5，E = 7.75，wait 8.25 &lt; 8.5 不卡 → 12.5
+     ta=2：o = max(0, min(7, 10.5) − 7.5) = 0 → 14.5
+     → (1, 12.5)          最早的 trigger 不再最优
+</code></pre>
+<p>下面这张图把上面的草稿纸画成两行时间轴，所有参数都可以改。上面一行是 gemm1，下面一行是 gemm2；蓝色竖线是 trigger，橙色竖线是 wait，红色虚线是 gemm1 真正结束的时刻。红色斜线的 phase 是 <code>check</code> 会报告的竞争：它在 wait 之前碰了 gemm1 的数据。先用默认的“小例子”对照草稿纸，再把 wait 拖到“无”、把 trigger 改成 0，看看红色 phase 落在 gemm1 结束线左边（真的读到了没写完的 H）还是右边（碰巧没出错，但仍然是竞争）。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 两行时间轴</div><img src="../figs/d4/d4_new-01.png" alt="手算草稿 · 两行时间轴" loading="lazy" style="width:100%;aspect-ratio:1461/1071"></figure>
+<h2 id="d4-6">图解详解：时间线、trigger、wait 与竞争检查</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>前面的流程图只给了因果结构。这一节把整道题拆成四张可交互的时间轴，每张对应一组要实现的函数。点按钮、拖滑块、把鼠标停在 phase 上，下方面板会把当前状态逐步代入公式。所有图都用同一套规则（和参考解逐行对应），默认状态的数字都和测试一致。</p>
+<p>先看全局：<code>timeline</code> 的骨架就是下面这段伪代码，后面每张图只是在画其中一两行。</p>
+<pre><code>for i, k in enumerate(kernels):
+    # ①  起点（图 1、图 2）
+    if i == 0:
+        start = 0                                         # kernel 0 从 0 开始
+    elif pdl and prev.trigger_after is not None:
+        start = prev_start + trigger_time(prev) + 0.5     # PDL：前驱 trigger 之后 0.5
+    else:
+        start = prev_end + gap                            # stream 3 / graph 1，或前驱没有 t
+    # ②  提前启动的代价（图 2）
+    if pdl and contention:
+        prev_end += contention * overlap
+    # ③  逐个 phase 推进，遇到 wait 就和“前驱结束 + flush”取 max（图 3）
+    t = start
+    for j, p in enumerate(k.phases):
+        if pdl and k.wait_before == j:
+            t = max(t, prev_end + 0.5)
+        phases.append((p.name, t, t + p.us))
+        t += p.us
+    if pdl and k.wait_before == len(k.phases):
+        t = max(t, prev_end + 0.5)
+# ④  正确性和上面的时刻无关：check 只看哪些 phase 落在 wait 之前、碰了什么 buffer（图 3）
+</code></pre>
+<h3 id="d4-6-1">图 1 · 四种 mode：<code>timeline</code> 的起点规则与 <code>speedup</code></h3>
+<p>同一对 kernel 用四种 mode 各跑一遍，竖着排在一起比较。看三件事：</p>
+<ul>
+<li>stream 和 graph 的区别只有空隙（3 µs vs 1 µs），两个 kernel 从不重叠；gemm1 的 trigger 和 gemm2 的 wait 画成灰色虚线，表示“写了但被忽略”。</li>
+<li>pdl 和 graph_pdl 在有 trigger 时结果一样：起点由 trigger 决定，gap 根本不出现。把 trigger 切成“无”，它们就分别退化成 stream 和 graph（54 / 52）。</li>
+<li>gemm2 的 setup + prefetch 被“塞”到了 gemm1 的 epilogue 下面——这就是 PDL 省下的时间。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">stream · graph · pdl · graph_pdl 对比</div><img src="../figs/d4/d4_new-02.png" alt="stream · graph · pdl · graph_pdl 对比" loading="lazy" style="width:100%;aspect-ratio:1461/1550"></figure>
+<p>源码对照：PDL 只有在主机端用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/kernel_launch.h#L100-L117">cudaLaunchAttributeProgrammaticStreamSerialization</a> 发射时才生效，否则就是本图的 stream 行；device 端两条指令在没定义 <code>CUTLASS_ENABLE_GDC_FOR_SM90</code> 时会被编译成空（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L43-L55">CUTLASS_GDC_ENABLED 的条 件</a>），这时 kernel 的行为也退化成串行。</p>
+<h3 id="d4-6-2">图 2 · 拖动 trigger：<code>trigger_time</code> 、contention 与 <code>best_trigger</code></h3>
+<p>拖动 gemm1 的 <code>trigger_after</code> ，gemm2 整条时间线会跟着左右平移：起点永远是 <code>trigger</code> 时刻 <code>+ 0.5</code> 。但 gemm2 读 H 的 mainloop 还是被 wait 钉在 <code>gemm1</code> 结束 <code>+ 0.5</code> 之后，所以 trigger 再早也只能多藏住“wait 之前的那几段”。</p>
+<p>再把 contention 调到 0.5：gemm2 在 wait 之前跑的那段如果和 gemm1 重叠，gemm1 的结束会被推迟（橙色斜线），wait 也跟着推迟。右边的柱状图是 <code>best_trigger</code> 枚举的每个 trigger 位置的总时间，粗框是它返回的那个（并列时取更晚的）。</p>
+
+<figure class="flow snap"><div class="flow-head">trigger 位置 × contention</div><img src="../figs/d4/d4_new-03.png" alt="trigger 位置 × contention" loading="lazy" style="width:100%;aspect-ratio:1461/912"></figure>
+<p>CUTLASS 里 trigger 的位置就是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/README.md">example 63</a> 的 <code>overlap_ratio</code> ，源码注释（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L82-L91">launch_dependent_grids</a> ）说得很直白：“too early can compete with current kernels, while launching too late can lead to a long latency”。图里 contention = 0 和 0.5 两种情况的最优位置不同，正是这句话。</p>
+<h3 id="d4-6-3">图 3 · 挪动 wait：<code>check</code> 、<code>independent_operands</code> 、<code>latest_wait</code></h3>
+<p>这张图只改 gemm2 的 <code>wait_before</code> 。上半部分是时间线，下半部分的表格把每个 phase 的读写集合和 gemm1 的集合逐个求交：</p>
+<ul>
+<li>读冲突（RAW）：phase.reads ∩ gemm1.writes。gemm1 只写 H，所以只有 mainloop 有读冲突。</li>
+<li>写冲突（WAR / WAW）：phase.writes ∩ (gemm1.reads ∪ gemm1.writes)。默认没有；打开“setup 写 X”就会出现测试里的 WAR。</li>
+<li>只有落在 wait 之前（或者根本没有 wait）的冲突才报告。wait 往左挪：正确但会空等；往右挪过 <code>latest_wait</code> ：立刻出现红色竞争，不管时刻上是不是“碰巧”晚于 gemm1 结束。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">wait 的位置与竞争检查</div><img src="../figs/d4/d4_new-04.png" alt="wait 的位置与竞争检查" loading="lazy" style="width:100%;aspect-ratio:1461/1285"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L93-L101">wait_on_dependent_grids</a> 的注释是“enforces no global memory access prior to this instruction”，<code>asm</code> <code>volatile(... ::: &quot;memory&quot;)</code> 让编译器不能把访存挪到它前面。cooperative kernel 把 wait 放在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L602-L605">mainloop producer 发第 一个 TMA 之前</a>——它在 wait 之前不读 A、B，相当于本题的 <code>wait_before = 0</code> 附近；example 63 把权重 A 的加载挪到 wait 前（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/collective/sm90_mma_tma_gmma_ss_warpspecialized_with_prefetch.hpp#L514-L515">不等 wait 的 A</a> ），就是把 wait 往 <code>latest_wait</code> 推。</p>
+<h3 id="d4-6-4">图 4 · 放大到 CTA：kernel 级的 trigger 和 wait 是怎么来的</h3>
+<p>本题把一个 kernel 当成一条时间线。真实的 grid 有很多 CTA，各自调用 <code>launch_dependents</code> 。规则（CUDA 编程指南和 PTX ISA 原文见下）是：</p>
+<ul>
+<li>后继可以启动 ⇔ 前驱每一个 CTA 都已经发出 trigger 或者已经退出。所以 kernel 级的 <code>trigger_time</code> = 各 CTA trigger 时刻的最大值（没调用 trigger 的 CTA 按退出时刻算）。</li>
+<li>wait 返回 ⇔ 前驱所有 CTA 都结束、写入都刷出可见。所以 kernel 级的结束 = 各 CTA 结束时刻的最大值。</li>
+</ul>
+<p>下面用 3 个 CTA 的 gemm1（main 时长 4、4、5）和小例子里的 gemm2 演示。打开“CTA 1 不调用 trigger”或“CTA 2 变慢”，看 kernel 级 trigger 怎样被最慢的那个 CTA 拖住。这一层抽象成两个最大值以后，就回到了本题的模型。</p>
+
+<figure class="flow snap"><div class="flow-head">3 个 CTA 的 gemm1 → gemm2</div><img src="../figs/d4/d4_new-05.png" alt="3 个 CTA 的 gemm1 → gemm2" loading="lazy" style="width:100%;aspect-ratio:1461/805"></figure>
+<p>原文：CUDA 编程指南 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html">Programmatic Dependent Launch and Synchronization</a>（“The CUDA driver can launch the secondary kernel when all primary thread blocks have launched and executed <code>cudaTriggerProgrammaticLaunchCompletion</code> . If the primary kernel doesn’t execute the trigger, it implicitly occurs after all thread blocks in the primary kernel exit”）；PTX ISA <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-griddepcontrol">griddepcontrol</a>（launch_dependents 在“all other CTAs in the grid issue the same instruction or have completed”之后生效；wait 等到“all prerequisite grids in flight have completed and all the memory operations … are performed and made visible”）。注意“all primary thread blocks have launched”：如果 gemm1 的 CTA 多于一波，最后一波 CTA 没上 SM 之前 trigger 不会生效。</p>
+
+<div class="callout warn"><div class="callout-title">注意 · 模型之外的一处细节</div><p>PTX ISA 还写了一句：trigger 之前如果有 gpu scope 的 release fence，它会和后继 grid 的开始同步。也就是说，“写 → fence → trigger”能让后继在开始时看到这部分写入。本题（和 CUTLASS 的 GEMM kernel）不依赖这一点：check 只认 wait，trigger 不提供任何可见性。</p>
+</div>
+<h3 id="d4-6-5">速查：全部时间与检查公式</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数 / 量</th>
+<th>公式</th>
+<th>小例子</th>
+<th>测试例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kernel_time( k)</code></td>
+<td>Σ phase.us</td>
+<td>7 / 7</td>
+<td>26 / 25</td>
+</tr>
+<tr>
+<td><code>trigger_time (k)</code></td>
+<td>Σ phase[0..trigger_after].us；None → kernel_time</td>
+<td>5</td>
+<td>22</td>
+</tr>
+<tr>
+<td>start（stream/ graph）</td>
+<td>end₀ + 3 / end₀ + 1</td>
+<td>10 / 8</td>
+<td>29 / 27</td>
+</tr>
+<tr>
+<td>start（pdl，有 trigger）</td>
+<td>start₀ + trigger_time + 0.5；无 trigger 退化成上一行</td>
+<td>5.5</td>
+<td>22.5</td>
+</tr>
+<tr>
+<td>contention</td>
+<td>w = start + Σ wait 前 phase；o = max(0, min(E0,w) − start)；E = E0 + c·o</td>
+<td>ta=0, c=0.5：o=3, E=8.5</td>
+<td>ta=0, c=0.5：o=7, E=29.5</td>
+</tr>
+<tr>
+<td>wait 返回</td>
+<td>t = max(t, E + 0.5)，放在第 wait_before 个 phase 之前（= len 时放在最后）</td>
+<td>max(8.5, 7.5)</td>
+<td>max(29.5, 26.5)</td>
+</tr>
+<tr>
+<td><code>best_trigger</code></td>
+<td>枚举 trigger_after，取 total 最小；并列取更晚</td>
+<td>(0, 11.5) /c=0.5: (1, 12.5)</td>
+<td>(0, 44.5) /c=0.5: (1, 47.5)</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>wait 之前的 phase：reads ∩ p.writes → read-…；writes ∩ (p.reads ∪ p.writes) → write-…</td>
+<td>无 wait：['read-before-wait:gemm2.mainloop reads H']</td>
+<td></td>
+</tr>
+<tr>
+<td><code>independent_operands</code></td>
+<td>sorted(c.reads − p.writes)</td>
+<td>['W2']</td>
+<td></td>
+</tr>
+<tr>
+<td><code>latest_wait</code></td>
+<td>第一个有冲突的 phase 序号；没有 → len(phases)</td>
+<td>2（mainloop）</td>
+<td></td>
+</tr>
+<tr>
+<td><code>speedup</code></td>
+<td>total(base) / total(opt)</td>
+<td>17/12.5 = 1.36</td>
+<td>54/47.5 = 1.137</td>
+</tr>
+</tbody>
+</table></div>
+<p>两句话记住这道题：trigger 决定后继什么时候开始，wait 决定后继什么时候能碰前驱的数据；前者只影响快慢，后者决定对错。</p>
+<h2 id="d4-7">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ 文档里的 H = X·W1 → Y = H·W2：从 stream 54 µs 到 PDL 44.5 µs</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;stream&quot;, &quot;s&quot;: &quot;54.0&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;g&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;graph&quot;, &quot;s&quot;: &quot;52.0&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;PDL&quot;, &quot;s&quot;: &quot;47.5&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;contention&quot;, &quot;s&quot;: &quot;最优 trigger 变化&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;wait 太早&quot;, &quot;s&quot;: &quot;49.5&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;k&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;check&quot;, &quot;s&quot;: &quot;read-before-wait&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;g&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;g&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;e&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}, {&quot;a&quot;: &quot;e&quot;, &quot;b&quot;: &quot;k&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 168.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="s"><div class="step-title">1. 普通 stream</div><p>gemm1 = 2 + 20 + 4 = 26 µs，gemm2 = 2 + 5 + 15 + 3 = 25 µs。stream 模式下 gemm2 从 26 + 3 = 29 开始，spans <code>[(0, 26), (29, 54)]</code>，总时间 54。</p>
 </div><div class="step" data-hl="s,g"><div class="step-title">2. CUDA graph</div><p>graph 节点之间的空隙是 1 µs：gemm2 从 27 开始，总时间 52。graph 只缩短 launch 空隙，不让两个 kernel 重叠。</p>
@@ -322,7 +549,7 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="p,c"><div class="step-title">5. contention 改变最优 trigger</div><p>没有 contention 时 <code>best_trigger = (0, 44.5)</code>：setup 之后就 trigger 最好。contention = 0.5 时，<code>trigger_after = 0</code> 让 gemm2 的 setup + prefetch（7 µs）和 gemm1 重叠，gemm1 被拉长到 <code>26 + 0.5·7 = 29.5</code>，总时间 48.0；<code>trigger_after = 1</code> 时 gemm2 从 22.5 开始，只和 gemm1 重叠 26 − 22.5 = 3.5 µs，gemm1 拉长到 27.75，wait 在 28.25 返回，仍早于 mainloop 的 29.5，总时间不变，最优变成 <code>(1, 47.5)</code>。这就是 CUTLASS 注释说的“太早会和当前 kernel 抢资源”。</p>
 </div><div class="step" data-hl="e,k"><div class="step-title">6. 正确性检查</div><p>去掉 wait（<code>consumer_wait=&quot;none&quot;</code>），<code>check</code> 返回 <code>[&quot;read-before-wait: gemm2.mainloop reads H&quot;]</code>。如果 gemm2 的 setup 写了 X（gemm1 还在读），返回 <code>[&quot;write-before-wait: gemm2.setup writes X&quot;]</code>。改 trigger 的位置，这两条结果都不会变。</p>
 </div></div></div>
-<h2 id="d4-6">易错点</h2>
+<h2 id="d4-8">易错点</h2>
 <ul>
 <li><strong>wait 等到前驱的 trigger 就返回。</strong> trigger 不提供可见性，wait 等的是前驱完全结束 + flush。测试 <code>test_wait_waits_for_end_not_trigger</code> 把 epilogue 拉长到 30 µs，mainloop 必须从 52.5 开始。</li>
 <li><strong>前驱没有 trigger 时后继在前驱开始时启动。</strong> 没有 trigger 等价于“kernel 结束时隐式触发”，PDL 退化成串行加空隙。测试 <code>test_no_trigger_falls_back_to_gap</code>。</li>
@@ -331,12 +558,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>只检查读。</strong> 后继在 wait 之前写前驱的输入（WAR）同样是竞争。测试 <code>test_write_hazard_before_wait</code>。</li>
 <li><strong>用 trigger 的位置推断正确性。</strong> 测试 <code>test_trigger_position_never_changes_correctness</code> 遍历所有组合。</li>
 </ul>
-<h2 id="d4-7">对照文档</h2>
+<h2 id="d4-9">对照文档</h2>
 <blockquote>
 <p>“PDL 不等于 kernel 内 pipeline。它解决的是两个有依赖关系的 kernel 之间的启动时机：允许 consumer kernel 在 producer kernel 完全结束之前就开始执行一部分与 producer 输出无关的工作。……Consumer 只能在同步前访问明确独立于 producer 的数据。不能因为 kernel 已经提前启动，就提前读取 producer 尚未完成写入的输出。”</p>
 </blockquote>
 <p>文档里的“Producer 先完成必要写入 → 触发 programmatic completion → Consumer 先做不依赖 producer 的工作 → grid dependency synchronize → 再读取依赖 producer 的结果”五个框，在本题里分别是 <code>trigger_after</code>、<code>PDL_LAUNCH_US</code>、<code>prefetch_w2</code>、<code>wait_before</code>、<code>mainloop</code>。文档说“预取 W₂、准备地址”可以提前做，<code>independent_operands</code> 就是把这句话变成集合运算：consumer 的 reads 减去 producer 的 writes。</p>
-<h2 id="d4-8">真实代码</h2>
+<h2 id="d4-10">真实代码</h2>
 <p>两条指令和它们的注释（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h">grid_dependency_control.h</a>）：</p>
 <pre><code class="language-cpp">// launch_dependents doesn't impact the functionality but the performance:
 // Launching a dependent kernel too early can compete with current kernels,
@@ -383,7 +610,60 @@ for (int cnt = 0; k_tile_count &gt; 0; --k_tile_count, ++cnt) {
 </tr>
 </tbody>
 </table></div>
-<h2 id="d4-9">上机验证</h2>
+<h2 id="d4-11">真实代码</h2>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/grid_dependency_control.h#L83-L101">grid_dependency_control.h</a> ，两条指令和它们的注释：</p>
+<pre><code>// launch_dependents doesn't impact the functionality but the performance:
+// Launching a dependent kernel too early can compete with current kernels,
+// while launching too late can lead to a long latency.
+void launch_dependent_grids() { asm volatile(&quot;griddepcontrol.launch_dependents;&quot;); }
+// enforces no global memory access prior to this instruction.
+void wait_on_dependent_grids() { asm volatile(&quot;griddepcontrol.wait;&quot; ::: &quot;memory&quot;); }
+</code></pre>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/collective/sm90_mma_tma_gmma_ss_warpspecialized_with_prefetch.hpp#L422-L457">example 63 的 producer</a> ：拆成两组 DMA warp 时，加载 B（激活，前驱的输出）的 warp 先 wait，加载 A（权重）的 warp <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/collective/sm90_mma_tma_gmma_ss_warpspecialized_with_prefetch.hpp#L514-L515">不等</a>；trigger 在发出一定比例的 k-tile 之后：</p>
+<pre><code>cutlass::arch::wait_on_dependent_grids();         // &quot;We have to wait on dependent grids b
+for (int cnt = 0; k_tile_count &gt; 0; --k_tile_count, ++cnt) {
+  pipeline.producer_acquire(smem_pipe_write);
+  copy(tma_load_a ..., EVICT_FIRST);  copy(tma_load_b ..., EVICT_LAST);
+  if (cnt &gt;= launch_dep_grids_threshold &amp;&amp; !launch_dep_grids) {   // overlap_ratio 决定这个
+    launch_dep_grids = true;
+    cutlass::arch::launch_dependent_grids();
+  }
+  ++smem_pipe_write;
+}
+if (!launch_dep_grids) cutlass::arch::launch_dependent_grids();   // 至少在结尾触发一次
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>文档 / 本题</th>
+<th>CUTLASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trigger_after</code></td>
+<td><code>overlap_ratio</code> （<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/63_hopper_gemm_with_weight_prefetch/README.md">README</a> ：默认 0.5，约一半 k-tile 之后）</td>
+</tr>
+<tr>
+<td><code>wait_before = latest_wait(...)</code></td>
+<td>读 B 之前的 <code>wait_on_dependent_grids()</code></td>
+</tr>
+<tr>
+<td><code>independent_operands = ['W2']</code></td>
+<td>不等 wait 就加载的 A（“we assume <code>A</code> (weights) are static”）</td>
+</tr>
+<tr>
+<td><code>contention</code></td>
+<td><code>launch_dependent_grids</code> 注释里的 “compete with current kernels”</td>
+</tr>
+<tr>
+<td><code>mode=&quot;pdl&quot;</code></td>
+<td><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/kernel_launch.h#L100-L117">kernel_launch</a> 设置 <code>programmaticStreamSerializationAllowed = 1</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>注意 example 63 的权重是 A、激活是 B；本题按文档写成 Y = H·W2，权重在第二个位置。</p>
+<h2 id="d4-12">上机验证</h2>
 <p>本机没有 Hopper GPU，PDL 的真实效果没法在这里测。有 sm90（或更新）的机器时可以这样对照：</p>
 <pre><code class="language-bash"># CUTLASS example 63：overlap_ratio 就是本题的 trigger 位置，-1 表示关闭 PDL 重叠
 ./63_hopper_gemm_with_weight_prefetch --m=8192 --n=1 --k=8192 --o=-1.0 --p=-1.0
@@ -393,7 +673,7 @@ for (int cnt = 0; k_tile_count &gt; 0; --k_tile_count, ++cnt) {
 nsys profile --cuda-graph-trace=node -o pdl ./your_two_gemm_app
 </code></pre>
 <p>RTX 5090（SM120）也支持 <code>griddepcontrol</code>，<a href="https://github.com/kzhou003/cuda-kernels-dev-drills">cuda-kernels-dev-drills</a> 里有在 5090 上真机测 PDL 的练习。</p>
-<h2 id="d4-10">三级提示</h2>
+<h2 id="d4-13">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">ks = two_gemm_chain()
 kernel_time(ks[0]), trigger_time(ks[0])          # (26.0, 22.0)
@@ -425,10 +705,10 @@ independent_operands(*ks), latest_wait(*ks)      # (['W2'], 2)
 <li>起点由前驱的 trigger 决定（trigger 时刻 + <code>PDL_LAUNCH_US</code>），前驱没有 trigger 时由前驱结束决定；wait 返回的时刻永远由前驱<strong>结束</strong>决定（+ flush），和 trigger 无关。</li>
 <li>trigger 只是“可以开始调度后继”的提示，不带任何内存语义；wait 才是唯一的同步点，它保证前驱的所有写对后继可见。所以数据依赖只能由 wait 的位置保证。</li>
 <li>后继提前启动后，它的 CTA 要占 SM、寄存器、SMEM 和带宽。如果前驱还有很多工作没做完，这些资源被抢走会拉长前驱，而前驱的结束又决定了 wait 返回的时刻：trigger 太早可能得不偿失。</li>
-<li>可以更晚（例如 epilogue 前），但没有必要，只会白白推迟；不能更早于第一个读 H 的 phase，否则就是 read-before-wait。最晚的<strong>正确</strong>位置 <code>latest_wait</code> 通常也是最快的位置：它让最多的独立工作藏在前驱后面。</li>
+<li>不能更晚：<code>latest_wait</code> 就是第一个读 H 的 phase（mainloop），再往后挪，mainloop 就落在 wait 之前，<code>check</code> 报 <code>read-before-wait: gemm2.mainloop reads H</code>——哪怕时间上它碰巧晚于 gemm1 结束，也没有可见性保证。更早是正确的，但会让 W2 预取这类独立工作排到 wait 后面去空等，例子里从 47.5 变成 49.5（放在 setup 前则是 51.5）。所以 <code>latest_wait</code> 是正确位置里最晚、也最快的。</li>
 </ol>
 </div></details></div></details>
-<h2 id="d4-11">参考解</h2>
+<h2 id="d4-14">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/d4_pdl_chain.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d4_pdl_chain.py</span><span class="muted small">224 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D4 · PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查 — reference solution.
 
@@ -654,7 +934,7 @@ def latest_wait(producer: Kernel, consumer: Kernel) -&gt; int:
 def speedup(kernels, base: str, opt: str) -&gt; float:
     &quot;&quot;&quot;timeline(base) 总时间 / timeline(opt) 总时间。&quot;&quot;&quot;
     return timeline(kernels, base)[&quot;total&quot;] / timeline(kernels, opt)[&quot;total&quot;]</code></pre></div></div></details>
-<h2 id="d4-12">面试官追问 &amp; 对照源码</h2>
+<h2 id="d4-15">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>三个 kernel 的链 A → B → C：C 能不能在 A 结束前启动？<code>griddepcontrol.wait</code> 等的是“直接前驱”还是“所有前驱”？</li>
 <li>CUDA Graph 里怎样表达 PDL 的依赖边（programmatic dependency edge）？它和普通边在 graph 实例化时有什么不同？</li>
@@ -669,14 +949,22 @@ def speedup(kernels, base: str, opt: str) -&gt; float:
 <a class="o2" href="#d4-2">直觉与类比</a>
 <a class="o2" href="#d4-3">PDL 的价值在哪一层体现</a>
 <a class="o2" href="#d4-4">图解：四种 mode 的时间关系</a>
-<a class="o2" href="#d4-5">逐步演示</a>
-<a class="o2" href="#d4-6">易错点</a>
-<a class="o2" href="#d4-7">对照文档</a>
-<a class="o2" href="#d4-8">真实代码</a>
-<a class="o2" href="#d4-9">上机验证</a>
-<a class="o2" href="#d4-10">三级提示</a>
-<a class="o2" href="#d4-11">参考解</a>
-<a class="o2" href="#d4-12">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#d4-5">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#d4-6">图解详解：时间线、trigger、wait 与竞争检查</a>
+<a class="o3" href="#d4-6-1">图 1 · 四种 mode：timeline 的起点规则与 speedup</a>
+<a class="o3" href="#d4-6-2">图 2 · 拖动 trigger：trigger_time 、contention 与 best_trigger</a>
+<a class="o3" href="#d4-6-3">图 3 · 挪动 wait：check 、independent_operands 、latest_wait</a>
+<a class="o3" href="#d4-6-4">图 4 · 放大到 CTA：kernel 级的 trigger 和 wait 是怎么来的</a>
+<a class="o3" href="#d4-6-5">速查：全部时间与检查公式</a>
+<a class="o2" href="#d4-7">逐步演示</a>
+<a class="o2" href="#d4-8">易错点</a>
+<a class="o2" href="#d4-9">对照文档</a>
+<a class="o2" href="#d4-10">真实代码</a>
+<a class="o2" href="#d4-11">真实代码</a>
+<a class="o2" href="#d4-12">上机验证</a>
+<a class="o2" href="#d4-13">三级提示</a>
+<a class="o2" href="#d4-14">参考解</a>
+<a class="o2" href="#d4-15">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

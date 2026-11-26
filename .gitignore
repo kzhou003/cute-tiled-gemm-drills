@@ -10,3 +10,4 @@ third_party/
 .venv-skill/
 oracle/build/
 playground/build/
+build/

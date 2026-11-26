@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">A1 · Track A · 从零设计：五个空间映射问题 · 45 分钟 · 易</div><h1>A1 · CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</h1><p class="lede">设计 Tiled GEMM 的第一个问题：每个 CTA 负责 C 的哪一块、每轮 K 循环要拿 A 和 B 的哪一段。本题先忘掉 CuTe 的 API，只用整数运算把四个 CTA、四轮 K 循环、越界的边界块全部推出来，再和真实 CuTe 的 local_tile 逐个坐标对拍。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/a1_cta_tiling.py"><code>mine/a1_cta_tiling.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_a1_cta_tiling.py"><code>tests/test_a1_cta_tiling.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/a1_cta_tiling.py"><code>solutions/a1_cta_tiling.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A1"> 我已完成这道题</label></header>
 <h2 id="a1-1">题面速览</h2>
@@ -305,7 +317,245 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="a1-3">图解：一个 CTA 看到的三块视图</h2>
 
 <figure class="flow"><div class="flow-head">CTA (pid_m, pid_n) 的视图<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;CTA (pid_m, pid_n) 的视图&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;grid&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;CTA 网格&quot;, &quot;s&quot;: &quot;ceil(M/BM) × ceil(N/BN)&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;C 视图&quot;, &quot;s&quot;: &quot;起点 (pm·BM, pn·BN)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;A 视图 × k&quot;, &quot;s&quot;: &quot;(BM,BK)：行由 pm 定&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;b&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;B 视图 × k&quot;, &quot;s&quot;: &quot;(BN,BK)：行由 pn 定&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;谓词&quot;, &quot;s&quot;: &quot;coord &lt; (M,N,K)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;grid&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;a&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;b&quot;, &quot;b&quot;: &quot;p&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 230.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 180.0}}"></div><figcaption>三个视图都只是坐标平移。A 视图不依赖 pn：同一行的两个 CTA 读同一块 A，这块数据的复用发生在 L2 cache 里，CTA 自己看不到。</figcaption></figure>
-<h2 id="a1-4">逐步演示</h2>
+<h2 id="a1-4">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 64×64。拿一个小到可以把每个格子都写出来的例子手算一遍，规律就清楚了，然后再放大到测试里的尺寸，最后写成一般公式。这也是你自己推这道题时应该在草稿纸上画的东西。</p>
+<p>① 小：M=5, N=3, K=4，tile 2×2×2</p>
+<p>一共 15 个 C 元素，每个坐标都能手写出来。重点看最后一块怎样越界。</p>
+<pre><code>grid = (3, 2)，K 循环 2 轮
+CTA (2,1)：C 起点 (4, 2)，只有 1 个有效
+</code></pre>
+<p>② 中：64×64×64，tile 32×32×16</p>
+<p>这是测试的运行例子，尺寸能整除，没有越界。</p>
+<pre><code>grid = (2, 2)，K 循环 4 轮
+每个视图 1024 / 512 个坐标
+</code></pre>
+<p>③ ragged：70×50×40</p>
+<p>和 ② 用同样的 tile，但尺寸不能整除，最后一块被谓词截掉。</p>
+<pre><code>grid = (3, 2)，K 循环 3 轮
+CTA (2,1)：108 / 1024 有效
+</code></pre>
+<p>④ 一般把 ①–③ 里反复出现的模式写成公式。</p>
+<pre><code>起点 = 块号 × 块大小
+第 i 个 = 起点 + (i % R, i // R)
+有效 ⇔ 每一维 coord &lt; shape
+</code></pre>
+<p><strong>✎</strong> 草稿纸：M=5, N=3, K=4，BM=BN=BK=2</p>
+<pre><code class="language-text">1) 网格    num_tiles(5,2) = ceil(5/2) = 3      num_tiles(3,2) = 2      num_tiles(4,2)
+= 2
+           → cta_grid = (3, 2)：6 个 CTA；每个 CTA 的 K 循环 2 轮（k = 0, 1）
+2) CTA (2,1) 的 C tile：起点 (2·2, 1·2) = (4, 2)，形状 2×2
+           i:      0      1      2      3          ← colex：i%2 是行，i//2 是列
+           局部  (0,0)  (1,0)  (0,1)  (1,1)
+           全局  (4,2)  (5,2)  (4,3)  (5,3)
+           &lt;(5,3)?  T      F      F      F          ← (5,2): 5 不 &lt; 5；(4,3): 3 不 &lt; 3
+           → 只有 (4,2) 一个有效。C 只有 5 行 3 列，(4,2) 正是右下角那个元素
+3) 第 k=1 轮 A 视图：起点 (pm·2, k·2) = (4, 2)
+           全局  (4,2)  (5,2)  (4,3)  (5,3)   对 (M,K) = (5,4)：  T  F  T  F
+   第 k=1 轮 B 视图：起点 (pn·2, k·2) = (2, 2)
+           全局  (2,2)  (3,2)  (2,3)  (3,3)   对 (N,K) = (3,4)：  T  F  T  F
+4) 覆盖    有效行数按块是 [2, 2, 1]，有效列数按块是 [2, 1]
+           Σ = (2+2+1) × (2+1) = 15 = 5×3   ✓ 恰好一次
+5) 视图偏移  A 是 5×4 行主序（ld = 4）。A 视图起点 (4,2)，局部 (0,1) → 全局 (4,3)
+           offset = 4·4 + 3 = 19 = A 的最后一个元素   ✓
+</code></pre>
+<p>下面这张图可以任意改小尺寸（M、N、K ≤ 9，tile ≤ 4）。格子里写的是视图下标 i，绿色、蓝色、紫色表示谓词为真，红色斜线表示越界。下方面板直接打印出你的函数应该返回的列表。先用默认的预设对照上面的草稿纸，再自己改参数验证你的推理。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 小尺寸任意参数</div><img src="../figs/a1/a1_new-01.png" alt="手算草稿 · 小尺寸任意参数" loading="lazy" style="width:100%;aspect-ratio:1461/1263"></figure>
+<h2 id="a1-5">图解详解：分块计算与坐标变化</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>前面的流程图只给了结构。这一节把整道题画成六张可交互的图，每张对应一个或几个要实现的函数。点按钮、拖滑块、把鼠标停在格子上，下方的黑底面板会把当前坐标逐步代入公式算给你看。</p>
+<p>先看全局：整道题其实就是下面这段伪代码里的“坐标部分”。测试 <code>test_gemm_from_tiles_equals_numpy</code> 也正是按这段代码拼出完整 GEMM 的。</p>
+<pre><code>gm, gn = cta_grid(M, N, BM, BN)                    # ①  有多少个 CTA（图 1）
+for pid_m in range(gm):                             # GPU 上这两层循环是并行的：每个 (pid_m, p
+    for pid_n in range(gn):
+        acc = zeros(BM, BN)                         #    累加器常驻寄存器，整个 K 循环都在原地累
+        for k in range(num_tiles(K, BK)):           # ②  K 循环：在一个 CTA 内串行（图 2）
+            ca = a_tile_coords(pid_m, k, BM, BK)    #    A 的 (BM, BK) 视图，colex 顺序（图 3
+            cb = b_tile_coords(pid_n, k, BN, BK)    #    B 的 (BN, BK) 视图
+            a  = load(ca, mask=predicate(ca, (M, K)))   # 越界的读 0（图 4）
+            b  = load(cb, mask=predicate(cb, (N, K)))
+            acc += a @ b.T                          #    (BM,BK)·(BK,BN) → (BM,BN)
+        cc = c_tile_coords(pid_m, pid_n, BM, BN)
+        store(cc, acc, mask=predicate(cc, (M, N)))  #    越界的不写；地址怎么算见 view_offset
+# 所有 CTA 的有效写入恰好覆盖 C 每个元素一次：verify_cover（图 6）
+</code></pre>
+<h3 id="a1-5-1">图 1 · 把 C 切成 CTA 网格：<code>num_tiles</code> / <code>cta_grid</code></h3>
+<p>C 是 M×N 的矩阵，竖直方向是 m（行），水平方向是 n（列）。每个 CTA 拿走一块 32×32 的 C tile。tile 数要向上取整：70 行切 32 行一块，需要 3 块（最后一块只有 6 行在矩阵里）。tile 本身不缩小，超出矩阵的部分（斜线）照样属于 tile，只是之后用谓词屏蔽。</p>
+
+<figure class="flow snap"><div class="flow-head">C 的 CTA 网格</div><img src="../figs/a1/a1_new-02.png" alt="C 的 CTA 网格" loading="lazy" style="width:100%;aspect-ratio:1461/1116"></figure>
+<h3 id="a1-5-2">图 2 · 一个 CTA 的 K 循环：A 横条 · B 横条 → C tile</h3>
+<p>CTA <code>(pid_m, pid_n)</code> 的 C tile 需要 A 的第 <code>pid_m</code> 条横带（BM 行、整个 K），以及 B 的第 <code>pid_n</code> 条横带（BN 行、整个 K）。注意 B 在这里按 N×K 存，所以 B 也是“横带”，乘的时候取转置。K 太长，一次搬不完，于是每轮只取 BK=16 列：第 k 轮取 <code>[16k, 16k+16)</code> 。算出的 32×16 · (32×16)ᵀ = 32×32 部分积，累加到同一个 acc 上。</p>
+<p>点“▶ 播放”看 k 从 0 走到最后一轮，再换到下一个 CTA。注意以下三件事：</p>
+<ul>
+<li>换 k 时，A、B 的深色块向右滑动，C tile 不动、颜色越来越深（累加）。</li>
+<li>换 <code>pid_n</code> 时 A 的横带完全不变，所以 <code>a_tile_coords</code> 根本没有 <code>pid_n</code> 参数。B 和 <code>pid_m</code> 的关系也一样。</li>
+<li>切到 ragged 后，最后一行 CTA 和最后一轮 k 都有红色斜线：这些坐标照样出现在视图里，只是谓词为 False，读进来当 0。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">C[M,N] = A[M,K] · B[N,K]ᵀ 的分块计算</div><img src="../figs/a1/a1_new-03.png" alt="C[M,N] = A[M,K] · B[N,K]ᵀ 的分块计算" loading="lazy" style="width:100%;aspect-ratio:1461/1135"></figure>
+
+<div class="callout key"><div class="callout-title">要点 · 和 CuTe 视图形状的对应</div><p>CuTe 把“所有 k 轮”打包成视图的第三维：<code>gA = local_tile(mA, (32,32,16), (pm,pn,_), Step&lt;_1,X,_1&gt;)</code> 的形状是 <code>(_32,_16,_4)</code> ，layout 是 <code>(_32,_16,_4):(_1@0,_1@1,_16@1)</code> 。读法：沿第一维走一步，坐标第 0 维（m）加 1；沿第二维走一步，坐标第 1 维（k）加 1；沿第三维走一步（下一轮），k 加 16。所以图 2 里“深色块右移 16 列”就是这个 <code>_16@1</code> 。<code>gA(_,_,k)</code> 是第 k 轮那一块，对应你的 <code>a_tile_coords(pm, k, …)</code> 。<code>Step</code> 里的 <code>X</code> 表示丢掉那一维：A 用不到 n，B 用不到 m，C 用不到 k。</p>
+</div>
+<p>源码对照：<code>local_tile</code> 的定义在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1030-L1045">tensor_impl.hpp</a> ，带 <code>Step</code> 投影的版本见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1046-L1075">带投影的 local_tile</a> ；真实 kernel 里的三行调用在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L103-L105">sgemm_sm80.cu</a> 。</p>
+<h3 id="a1-5-3">图 3 · 视图内部的元素顺序：colex（第一维最快）</h3>
+<p><code>c_tile_coords</code> 返回的是一个有序列表，测试逐项比较，所以顺序必须和 CuTe 一致。CuTe 对一个形状为 (R, S) 的视图做一维索引 <code>t(i)</code> 时，第一维变化最快：<code>i → (i % R, i // R)</code> 。下面先用一个 4×3 的小 tile 看清这个规律：表格里每格写的是这个位置的 i。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>局部 <code>(r, c)</code></th>
+<th><code>c = 0</code></th>
+<th><code>c = 1</code></th>
+<th><code>c = 2</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>r = 0</code></td>
+<td><code>0 (0,0)</code></td>
+<td><code>4 (0,1)</code></td>
+<td><code>8 (0,2)</code></td>
+</tr>
+<tr>
+<td><code>r = 1</code></td>
+<td><code>1 (1,0)</code></td>
+<td><code>5 (1,1)</code></td>
+<td><code>9 (1,2)</code></td>
+</tr>
+<tr>
+<td><code>r = 2</code></td>
+<td><code>2 (2,0)</code></td>
+<td><code>6 (2,1)</code></td>
+<td><code>10 (2,2)</code></td>
+</tr>
+<tr>
+<td><code>r = 3</code></td>
+<td><code>3 (3,0)</code></td>
+<td><code>7 (3,1)</code></td>
+<td><code>11 (3,2)</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>i 先沿一列往下数（r = i % 4），数满 4 个才换到下一列（c = i // 4）。这是“列优先 / colex”，和 C 在内存里是不是行主序无关：它只是视图的遍历顺序。下面的图换成真实的 32×32 C tile，拖动 i 或把鼠标停在格子上即可查看。</p>
+
+<figure class="flow snap"><div class="flow-head">c_tile_coords(pid_m, pid_n, 32, 32)[i]</div><img src="../figs/a1/a1_new-04.png" alt="c_tile_coords(pid_m, pid_n, 32, 32)[i]" loading="lazy" style="width:100%;aspect-ratio:1461/1317"></figure>
+<h3 id="a1-5-4">图 4 · 边界块与谓词：<code>predicate</code></h3>
+<p>ragged 例子：M=70、N=50、K=40，网格 3×2，K 循环 3 轮。选一个 CTA 和一轮 k，看它的三个视图里哪些坐标通过 <code>coord[d] &lt; shape[d]</code> （每一维都要满足）。C 视图对 (M, N) 判断，A 视图对 (M, K) 判断，B 视图对 (N, K) 判断。默认选中的就是测试里的 CTA (2,1)、k=2：C 只有 6×18 = 108 个有效。A 视图在 m 和 k 两个方向同时越界，只剩 6×8 = 48 个有效。</p>
+
+<figure class="flow snap"><div class="flow-head">ragged 70×50×40：CTA 的三个视图与谓词</div><img src="../figs/a1/a1_new-05.png" alt="ragged 70×50×40：CTA 的三个视图与谓词" loading="lazy" style="width:100%;aspect-ratio:1461/1039"></figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>CTA (pm, pn)</th>
+<th>C tile 范围</th>
+<th>有效行 × 有效列</th>
+<th>有效 / 1024</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(0,0)</td>
+<td>m [0,32) · n [0,32)</td>
+<td>32 × 32</td>
+<td>1024</td>
+</tr>
+<tr>
+<td>(0,1)</td>
+<td>m [0,32) · n [32,64)</td>
+<td>32 × 18</td>
+<td>576</td>
+</tr>
+<tr>
+<td>(1,0)</td>
+<td>m [32,64) · n [0,32)</td>
+<td>32 × 32</td>
+<td>1024</td>
+</tr>
+<tr>
+<td>(1,1)</td>
+<td>m [32,64) · n [32,64)</td>
+<td>32 × 18</td>
+<td>576</td>
+</tr>
+<tr>
+<td>(2,0)</td>
+<td>m [64,96) · n [0,32)</td>
+<td>6 × 32</td>
+<td>192</td>
+</tr>
+<tr>
+<td>(2,1)</td>
+<td>m [64,96) · n [32,64)</td>
+<td>6 × 18</td>
+<td>108</td>
+</tr>
+<tr>
+<td>合计</td>
+<td>3500 = 70 × 50 ✓</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<p>源码对照：CuTe 的逐维比较是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/int_tuple.hpp#L885">elem_less</a> ；真实 kernel 怎样用 identity tensor 做谓词，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/tiled_copy_if.cu">tiled_copy_if.cu</a> 。</p>
+<h3 id="a1-5-5">图 5 · 视图不是拷贝：<code>view_offset</code></h3>
+<p><code>local_tile</code> 不搬任何数据。它只记住一个起点 <code>tile_origin</code> ，然后沿用原 tensor 的 stride。局部坐标 (r, c) 先平移成全局坐标 (r0+r, c0+c)，再按原矩阵的行主序（leading dimension = ld = 64）求偏移。右边画的是这个元素所在的行以及上下相邻行在一维内存里的样子：tile 的每一行在内存中是 16 个连续元素，相邻两行之间隔着 ld = 64。</p>
+
+<figure class="flow snap"><div class="flow-head">A[64×64]（行主序，ld = 64）上的 A 视图 → 一维内存偏移</div><img src="../figs/a1/a1_new-06.png" alt="A[64×64]（行主序，ld = 64）上的 A 视图 → 一维内存偏移" loading="lazy" style="width:100%;aspect-ratio:1461/1138"></figure>
+<h3 id="a1-5-6">图 6 · <code>verify_cover</code> ：每个元素恰好一次</h3>
+<p>把所有 CTA 中谓词为真的 C 坐标叠在一起计数，正确的切分应该让 [0,M)×[0,N) 每格恰好是 1。下面除了正确实现，还列了三种常见写错的方式，可以直接看出 <code>verify_cover</code> 会在哪里失败：</p>
+
+<figure class="flow snap"><div class="flow-head">覆盖计数热力图</div><img src="../figs/a1/a1_new-07.png" alt="覆盖计数热力图" loading="lazy" style="width:100%;aspect-ratio:1461/1349"></figure>
+<h3 id="a1-5-7">速查：全部坐标公式</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>视图形状</th>
+<th>起点 (origin)</th>
+<th>第 i 个元素</th>
+<th>谓词对照的 shape</th>
+<th>依赖</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>c_tile_coords(pm, pn, BM, BN)</code></td>
+<td>(BM,BN)</td>
+<td>(pm·BM,pn·BN)</td>
+<td>(pm·BM + i % BM,pn·BN + i // BM)</td>
+<td>(M, N)</td>
+<td>pm, pn</td>
+</tr>
+<tr>
+<td><code>a_tile_coords(pm, k, BM, BK)</code></td>
+<td>(BM,BK)</td>
+<td>(pm·BM,k·BK)</td>
+<td>(pm·BM + i % BM,k·BK + i // BM)</td>
+<td>(M, K)</td>
+<td>pm, k（与 pn 无关）</td>
+</tr>
+<tr>
+<td><code>b_tile_coords(pn, k, BN, BK)</code></td>
+<td>(BN,BK)</td>
+<td>(pn·BN,k·BK)</td>
+<td>(pn·BN + i % BN,k·BK + i // BN)</td>
+<td>(N, K)</td>
+<td>pn, k（与 pm 无关）</td>
+</tr>
+<tr>
+<td><code>view_offset((r,c), (r0,c0), ld)</code></td>
+<td>(r0 + r)·ld + (c0 + c)，即“平移 + 原 stride”，没有拷贝</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<p>三个 tile 函数其实是同一个函数 <code>_tile_coords(r0, c0, R, S)</code> ，只是起点和尺寸不同。抓住“起点 = 块号 × 块大小”和“i → (i % R, i // R)”这两点，这道题就写完了。</p>
+<h2 id="a1-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ 64×64×64，CTA tile 32×32×16</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;nt&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;num_tiles&quot;, &quot;s&quot;: &quot;64/32 = 2&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ct&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;C tile&quot;, &quot;s&quot;: &quot;CTA (1,0)：行 32..63&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kl&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;K 循环&quot;, &quot;s&quot;: &quot;64/16 = 4 轮&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;av&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;A 视图&quot;, &quot;s&quot;: &quot;k=1：列 16..31&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rg&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;ragged&quot;, &quot;s&quot;: &quot;70×50：108/1024&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;nt&quot;, &quot;b&quot;: &quot;ct&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ct&quot;, &quot;b&quot;: &quot;kl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kl&quot;, &quot;b&quot;: &quot;av&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ct:b&quot;, &quot;b&quot;: &quot;rg:l&quot;, &quot;t&quot;: &quot;边界&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 185.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="nt"><div class="step-title">1. 网格</div><p><code>cta_grid(64, 64, 32, 32) = (2, 2)</code>：四个 CTA。CuTe 对 <code>local_tile(A, (32,32,16), (pm,pn,_), Step&lt;_1,X,_1&gt;)</code> 给出的视图形状是 <code>(_32,_16,_4)</code>：32 行、16 列、4 个 K tile。</p>
 </div><div class="step" data-hl="nt,ct"><div class="step-title">2. CTA (1,0) 的 C tile</div><p>起点 (32, 0)。真实 CuTe 的 <code>gC(0,0) = (32,0)</code>、<code>gC(31,31) = (63,31)</code>。视图第 i 个元素是 <code>(32 + i % 32, i // 32)</code>。</p>
@@ -313,7 +563,7 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="kl,av"><div class="step-title">4. 第 1 轮的 A 视图</div><p><code>a_tile_coords(1, 1, 32, 16)</code> 的前几项是 <code>(32,16), (33,16), (34,16) …</code>，和 oracle 记录的一致。真实 CuTe 的 <code>gA(0,0,1) = (32,16)</code>、<code>gA(31,15,3) = (63,63)</code>。</p>
 </div><div class="step" data-hl="ct,rg"><div class="step-title">5. 边界块</div><p>70×50×40：网格 <code>(3, 2)</code>，K tile 数 3。CTA (2,1) 的 C 视图仍是完整的 32×32，起点 (64, 32)，但只有行 64..69（6 行）× 列 32..49（18 列）= <strong>108</strong> 个坐标在矩阵内，其余 916 个被谓词屏蔽。<span class="cells"><span class="cell ok">6行</span><span class="cell bad">26行</span><span class="cell ">×</span><span class="cell ok">18列</span><span class="cell bad">14列</span></span></p>
 </div></div></div>
-<h2 id="a1-5">易错点</h2>
+<h2 id="a1-7">易错点</h2>
 <ul>
 <li><strong>最后一块缩小 tile。</strong> CuTe 的视图形状永远是静态的 tile 形状，越界靠谓词。测试 <code>test_ragged_tile_keeps_full_static_shape</code> 要求返回完整的 1024 个坐标。</li>
 <li><strong>把 B 当成 K×N。</strong> 运行例子里 B 按 N×K 存，B 视图的第一维是 n。测试 <code>test_a_and_b_tile_coords_match_local_tile</code>。</li>
@@ -321,12 +571,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>谓词只看一维。</strong> 必须每一维都在范围内（<code>elem_less</code>）。<code>test_predicate_matches_elem_less</code> 的 ragged A 视图里 m 和 k 同时可能越界。</li>
 <li><strong>以为 local_tile 拷贝了数据。</strong> <code>view_offset</code> 只是平移；<code>test_view_offset_matches_numpy_slicing</code> 用 numpy 切片对照，<code>test_view_offset_is_pure_translation</code> 用真实 CuTe 的指针差对照。</li>
 </ul>
-<h2 id="a1-6">对照文档</h2>
+<h2 id="a1-8">对照文档</h2>
 <blockquote>
 <p>“以 CTA (0,0) 为例，它需要 A 的前 32 行和 B 的前 32 行，但 K=64 不必一次搬完。每轮处理 K 的 16 个元素……因此自然出现第一个需求：从全局 tensor 中，按 CTA 坐标取出当前 tile。CuTe 的 local_tile 负责构造这个局部视图……注意：local_tile 只确定当前 CTA 观察哪一块数据；它本身不决定每个线程搬什么，也不等于已经执行了内存 copy。”</p>
 </blockquote>
 <p>本题把这段话里的每一个数都算了出来，并补上文档没有展开的边界块：tile 不变，谓词屏蔽。</p>
-<h2 id="a1-7">上机验证</h2>
+<h2 id="a1-9">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/a1_cta_tiling.cpp      # 真实 CuTe，本机编译运行
 ./check.sh oracle a1                                # 重新生成 tests/golden/a1_cta_tiling.json
 </code></pre>
@@ -337,7 +587,7 @@ gA(pid_m=1, all k): (_32,_16,3):(_1@0,_1@1,_16@1)
 view of CTA (0,1) on row-major 64x64: offset(0,0)=32 offset(1,0)=96
 </code></pre>
 <p><code>(_32,_16,3):(_1@0,_1@1,_16@1)</code> 读作：第一维 stride 是“坐标第 0 维加 1”，第二维是“坐标第 1 维加 1”，第三维（K tile）是“坐标第 1 维加 16”。这正是“第 k 轮从第 16k 列开始”。<code>3</code> 前面没有下划线，因为 K = 40 是运行时值，K tile 数只能在运行时算出。</p>
-<h2 id="a1-8">三级提示</h2>
+<h2 id="a1-10">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">num_tiles(70, 32)                   # 3
 cta_grid(70, 50, 32, 32)            # (3, 2)
@@ -369,7 +619,7 @@ view_offset((1, 0), (0, 32), 64)    # 96
 <li>第 i 个元素是 <code>(i % R, i // R)</code>。CuTe 所有多维坐标都按 colex 线性化（最左边的模式变化最快），这是代数定义的约定，不代表内存连续方向；内存连续方向由 stride 决定。</li>
 </ol>
 </div></details></div></details>
-<h2 id="a1-9">参考解</h2>
+<h2 id="a1-11">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/a1_cta_tiling.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a1_cta_tiling.py</span><span class="muted small">173 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A1 · CTA 切分：C tile、K 循环、local_tile 视图与边界谓词 — reference solution.
 
@@ -544,7 +794,7 @@ def verify_cover(M: int, N: int, BM: int, BN: int) -&gt; bool:
                 if ok:
                     seen[c] = seen.get(c, 0) + 1
     return len(seen) == M * N and all(v == 1 for v in seen.values())</code></pre></div></div></details>
-<h2 id="a1-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="a1-12">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li><code>local_tile(A, tiler, (pm, pn, _), Step&lt;_1,X,_1&gt;{})</code> 里的 <code>X</code> 起什么作用？去掉 <code>Step</code> 会得到什么形状？（对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1050-L1068">带投影的 local_tile</a> 里的注释例子。）</li>
 <li>真实 kernel 怎样处理越界？对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/tiled_copy_if.cu">tiled_copy_if.cu</a>：它用 identity tensor 的 partition 做谓词，和本题的做法相同。</li>
@@ -558,13 +808,22 @@ def verify_cover(M: int, N: int, BM: int, BN: int) -&gt; bool:
 <a class="o2" href="#a1-1">题面速览</a>
 <a class="o2" href="#a1-2">直觉与类比</a>
 <a class="o2" href="#a1-3">图解：一个 CTA 看到的三块视图</a>
-<a class="o2" href="#a1-4">逐步演示</a>
-<a class="o2" href="#a1-5">易错点</a>
-<a class="o2" href="#a1-6">对照文档</a>
-<a class="o2" href="#a1-7">上机验证</a>
-<a class="o2" href="#a1-8">三级提示</a>
-<a class="o2" href="#a1-9">参考解</a>
-<a class="o2" href="#a1-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#a1-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#a1-5">图解详解：分块计算与坐标变化</a>
+<a class="o3" href="#a1-5-1">图 1 · 把 C 切成 CTA 网格：num_tiles / cta_grid</a>
+<a class="o3" href="#a1-5-2">图 2 · 一个 CTA 的 K 循环：A 横条 · B 横条 → C tile</a>
+<a class="o3" href="#a1-5-3">图 3 · 视图内部的元素顺序：colex（第一维最快）</a>
+<a class="o3" href="#a1-5-4">图 4 · 边界块与谓词：predicate</a>
+<a class="o3" href="#a1-5-5">图 5 · 视图不是拷贝：view_offset</a>
+<a class="o3" href="#a1-5-6">图 6 · verify_cover ：每个元素恰好一次</a>
+<a class="o3" href="#a1-5-7">速查：全部坐标公式</a>
+<a class="o2" href="#a1-6">逐步演示</a>
+<a class="o2" href="#a1-7">易错点</a>
+<a class="o2" href="#a1-8">对照文档</a>
+<a class="o2" href="#a1-9">上机验证</a>
+<a class="o2" href="#a1-10">三级提示</a>
+<a class="o2" href="#a1-11">参考解</a>
+<a class="o2" href="#a1-12">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

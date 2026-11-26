@@ -12,7 +12,7 @@ TP=third_party
 mkdir -p oracle/build
 ${CXX:-clang++} -std=c++17 -O1 -w \
   -I $TP/cutlass/include -I $TP/cccl/libcudacxx/include -I $TP/cccl/cub -I $TP/cccl/thrust -I $TP/cuda/include \
-  -I oracle "$src" -o "oracle/build/$stem"
+  -I oracle -I gpu "$src" -o "oracle/build/$stem"
 "oracle/build/$stem" > "tests/golden/$stem.json.tmp"
 python3 -c "import json,sys; json.load(open(sys.argv[1]))" "tests/golden/$stem.json.tmp"
 mv "tests/golden/$stem.json.tmp" "tests/golden/$stem.json"

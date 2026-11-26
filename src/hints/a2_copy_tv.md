@@ -45,6 +45,187 @@ e tv -> st
 cap: CuTe 里同一件事是 `layout_tv = right_inverse(raked_product(thr, val))`（[[cutlass:include/cute/atom/copy_atom.hpp@make_tiled_copy|make_tiled_copy]]）。Track B 会用代数重写这一步，这里先用整数推导。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+先别管 128 个线程、32×16 的 tile。拿一个小到能把每个格子都写出来的例子手算一遍：8 个线程、每个线程 2 个值、一个 4×4 的 tile。把“谁搬哪个格子”画清楚之后，再放大到测试的运行例子，再看会让结果变差的反例，最后写成一般公式。
+
+① 小：ThrLayout (4,2):(2,1)，ValLayout (1,2)
+
+8 个线程 × 2 个值 = 4×4 的 tile，16 个格子全部能写出来。
+
+```
+线程 5 → (tm,tk) = (2,1) → 搬 (2,2) (2,3)
+tv_index_map = [0,8,1,9,2,10,3,11,
+4,12,5,13,6,14,7,15]
+vector_elems = 2，1 条指令，4 个 sector
+```
+
+② 运行例子：base (32,4):(4,1)，(1,4)
+
+测试里的 128 个线程、32×16 tile。规则和 ① 完全一样，只是数字变大。
+
+```
+线程 5 → (1,1) → 搬 (1,4) (1,5) (1,6)
+(1,7)
+vector_elems = 4（8 字节），1 条指令
+sectors_per_warp = [8,8,8,8]，效率 1.0
+```
+
+③ 反例：只改一个参数
+
+线程 stride 改成 (1,32)、或者把 tile 原点挪到 k0 = 2。
+
+```
+colthr：每个 warp 32 个 sector，共 128，效
+率 0.25
+base, k0=2：w 掉到 2，2 条指令，共 96 个
+sector
+t16x8_v2x2：v0、v1 上下相邻 → w = 1，4 条指
+令
+```
+
+④ 一般
+
+把 ①–③ 里反复用到的规则写成公式。
+
+```
+(tm,tk) = ThrLayout⁻¹(t)
+(m,k)   = (tm·VM + v%VM, tk·VK + v//VM)
+TV[t + T·v] = m + TILE_M·k
+addr    = ((m0+m)·ld + (k0+k))·2
+```
+
+**✎** 草稿纸：ThrLayout (4,2):(2,1)，ValLayout (1,2)，ld = 64，half（2 字节）
+
+```text
+1) 线程布局求逆   t = tm·2 + tk·1，把 8 个坐标全部代进去：
+        (0,0)→0  (0,1)→1  (1,0)→2  (1,1)→3  (2,0)→4  (2,1)→5  (3,0)→6  (3,1)→7
+   0..7 各出现一次 → 是双射。反过来读：thread_coord(t) = (t // 2, t % 2)，例如 t=5 → (2,1) 2) tile 形状 = (TM·VM, TK·VK) = (4·1, 2·2) = (4, 4)；每个线程的小块是 1×2（同一行两个相邻格子）
+   线程 5 = (2,1)：v=0 → (2·1 + 0%1, 1·2 + 0//1) = (2,2)
+                   v=1 → (2·1 + 1%1, 1·2 + 1//1) = (2,3)
+   整张 tile（格子里写 t·v）：
+              k=0    k=1    k=2    k=3
+        m=0   t0·v0  t0·v1  t1·v0  t1·v1
+        m=1   t2·v0  t2·v1  t3·v0  t3·v1
+        m=2   t4·v0  t4·v1  t5·v0  t5·v1
+        m=3   t6·v0  t6·v1  t7·v0  t7·v1        ← 16 格恰好各一次
+3) TV 表：第 i = t + 8·v 项 = m + 4·k（t 变化最快）
+   i = 0..7  (v=0)：t0..t7 的 v0 = (0,0)(0,2)(1,0)(1,2)(2,0)(2,2)(3,0)(3,2) → 0, 8, 1, 9, 2, 10, 3, 11
+   i = 8..15 (v=1)：t0..t7 的 v1 = (0,1)(0,3)(1,1)(1,3)(2,1)(2,3)(3,1)(3,3) → 4, 12,
+5, 13, 6, 14, 7, 15
+4) 字节地址 (m·64 + k)·2：线程 5 的 v0 = (2·64 + 2)·2 = 260，v1 = (2·64 + 3)·2 = 262
+   vector_elems：w=8、w=4 跳过（V = 2 不能整除）；w=2：260 → 262 相差 2 ✓，260 % 4 = 0 ✓
+   8 个线程都满足 → w = 2，vec_bytes = 4，instr_per_thread = 2 // 2 = 1
+   换成 k0 = 1：线程 0 的组首 = (0·64 + 1)·2 = 2，2 % 4 ≠ 0 → w=2 失败 → w = 1，2 条指令
+5) sector（32 字节一格，sector 号 = byte // 32）：8 个线程都在 warp 0，只有 1 条指令
+   第 m 行的 tile 占字节 [128m, 128m + 8) → 都在 sector 4m 里 → {0, 4, 8, 12} = 4 个
+   efficiency = tile 字节数 / (sector 数·32) = 32 / 128 = 0.25   ← tile 一行只有 8 字节，每个 sector 只用到 1/4
+   换成列主序线程 (4,2):(1,4)：线程 1 = (1,0) 搬 (1,0)(1,1)，格子换了主人，但同一个 warp 碰到的 sector 还是这 4 个
+   → 小例子整张 tile 都在同一个 warp 里，看不出“线程之间的连续性”。这要到 ② 的规模才看得出来：
+6) 放大到 base：warp 0 = 线程 0..31 = 第 0..7 行，每行 4 个线程 × 8 字节 = 32 字节 = 正好 1个 sector → 8 个
+   colthr (1,32)：warp 0 = 线程 0..31 = 第 0..31 行的 k = 0..3，每个 lane 一行 → 32 个
+sector，每个只用 8 字节
+```
+
+下面这张图可以随意改小参数（tile 每一维不超过 8）。左上是线程布局（格子里是线程号），左下是值布局（格子里是值号 v），右边是 tile：每个格子写着它归哪个线程 t、是这个线程的第几个值 v，粗框是一个线程的小块。底下一行是 `tv_index_map` 的取值表。下方面板打印你的函数对这组参数应该返回的结果。先用默认预设对照草稿纸，再切到“(1,1) 非双射”看
+
+`thread_coord` 为什么要报错。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">手算草稿 · 小尺寸 TV 映射</div><img src="../figs/a2/a2_new-01.png" alt="手算草稿 · 小尺寸 TV 映射" loading="lazy" style="width:100%;aspect-ratio:1461/1605"></figure>
+:::
+
+## 图解详解：TV 映射、sector 与向量宽度
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+这一节把整道题拆成五张可交互的图，每张对应一两个要实现的函数。四种方案都能切换。下方黑底面板会把当前状态逐步代入公式。先看整道题在一个 kernel 里对应什么（伪代码，只保留坐标和地址部分）：
+
+```
+t = threadIdx.x                                   # 0..127
+tm, tk = thread_coord(thr_shape, thr_stride, t)   # ①  线程布局求逆（图 1）
+for g in range(V // w):                           # ③  每个线程发 V/w 条访存指令（w = vector_e
+    vs = range(g*w, (g+1)*w)                      #    第 g 条指令搬值 v = g·w .. g·w+w-1
+    m, k = tm*VM + vs[0] % VM, tk*VK + vs[0] // VM    # ②  raked 公式 → tile 坐标（图 1、图 2
+    a = byte_addr(m, k, m0, k0, ld)               #    一个 warp 的 32 个 a 落在几个 32 字节
+    reg[vs] = load_w_halves(A_bytes + a)          #    LDG.64 (w=4) / LDG.32 (w=2) / LDG.1
+```
+
+### 图 1 · 线程布局求逆 + raked：`thread_coord` / `copy_coords`
+
+左边是 ThrLayout：格子 (tm, tk) 里写的是 `t = tm·s0 + tk·s1` 。搬运时线程只知道自己的 t，所以要反过来在左图里找到写着 t 的格子，得到 (tm, tk)。右边是 32×16 的 tile，每个格子写着搬它的线程号，颜色表示 warp（t // 32）。拖动 t 或者点播放，看高亮的 V 个格子（写着 v0..v3）怎样在 tile 上移动：
+
+- base：t 每加 1，向右挪 4 列；每 4 个线程换一行。一个 warp（同一种颜色）是 8 整行。
+- colthr：t 每加 1，向下挪 1 行；一个 warp 是第 0 列块的 32 行。每个线程搬的东西和 base 一样宽，只是邻居换了方向。
+- t16x8\_v2x2：每个线程是 2×2 小块，v0、v1 上下相邻（值按列主序编号）。t8x16\_v4x1：每个线程是一列上的 4 个格子。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">32×16 tile 上的 Copy TV 映射</div><img src="../figs/a2/a2_new-02.png" alt="32×16 tile 上的 Copy TV 映射" loading="lazy" style="width:100%;aspect-ratio:1461/1681"></figure>
+:::
+
+对照源码：`make_tiled_copy` 先做 `raked_product(thr_layout, val_layout)` （得到 (m,k) → (thread, value)），再 `right_inverse` 得到 (thread, value) → (m,k)，见 [[cutlass:include/cute/atom/copy_atom.hpp#L490-L516|make_tiled_copy]] ；`raked_product` 本身在 [[cutlass:include/cute/layout.hpp#L1784-L1800|layout.hpp]] ，`right_inverse` 在 [[cutlass:include/cute/layout.hpp#L1305|layout.hpp]] 。每个线程拿到自己那份的是 [[cutlass:include/cute/atom/copy_atom.hpp#L365-L373|partition_S]] 。CuTe 官方教程里一个完全同构的例子（`thr_layout (32,8)` 、`val_layout (4,1)` ）在 [[cutlass:examples/cute/tutorial/tiled_copy.cu#L182-L209|tiled_copy.cu]] 。
+
+### 图 2 · TV 表的下标顺序：`tv_index_map`
+
+`copy_coords` 按“线程在外、值在内”列出坐标（t-major），而 CuTe 的 `get_layoutS_TV()` 是一个形状为 (T, V) 的
+
+layout，它的一维取值表按 colex 顺序排列：t 变化最快。所以第 i 项是 `t = i % 128, v = i // 128` 。下面把这张表画成 V 行 × 128 列（一行一个 v），一次看 16 个线程。格子里是 `m + 32·k` （tile 的列主序下标），小字是 (m,k)。注意 i 是沿一行增长的，读完 128 个线程的 v0 才轮到 v1。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">tv_index_map = get_layoutS_TV() 的取值表</div><img src="../figs/a2/a2_new-03.png" alt="tv_index_map = get_layoutS_TV() 的取值表" loading="lazy" style="width:100%;aspect-ratio:1461/909"></figure>
+:::
+
+源码对照：`get_layoutS_TV()` 的定义在 [[cutlass:include/cute/atom/copy_atom.hpp#L318-L326|copy_atom.hpp]] ；layout 的一维下标按 colex 顺序拆成多维坐标的规则见 [[cutlass:media/docs/cpp/cute/01_layout.md|CuTe 文 档 01_layout.md]]。
+
+### 图 3 · 线程之间的连续性：一个 warp 的一条指令碰几个 sector
+
+这张图画的是 global memory 本身：A 是行主序、ld = 64 个 half，所以 A 的每一行是 128 字节 = 4 个 sector。图里每行只画前 64 字节（2 个 sector，中间的竖虚线是 sector 边界），足够装下 32 字节宽的 tile 行（虚线框，从第 k0 个元素开始）。选一个 warp 和它的第 g 条指令：彩色格子是这条指令里 32 个 lane 实际读的字节（颜色 = lane % 8），橙色框是被碰到的 sector。sector 号 = `byte // 32` ，第 m 行的两个 sector 号是 4m 和 4m+1。
+
+- base：warp 0 只占 8 行，每行正好 1 个 sector 全用满 → 8 个。
+- colthr：warp 0 占 32 行，每行只读 8 字节，却要碰 1 个 sector → 32 个，每个只用 1/4。
+- t8x16\_v4x1：每条指令只读 2 字节，但 32 个 lane 拼成 2 整行 → 每条指令 2 个 sector，4 条共 8 个。
+- k0 = 2：tile 行跨过 sector 边界，每行要碰 2 个 sector；而且 w 从 4 掉到 2，指令数翻倍。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">一个 warp、一条指令的 sector 计数</div><img src="../figs/a2/a2_new-04.png" alt="一个 warp、一条指令的 sector 计数" loading="lazy" style="width:100%;aspect-ratio:1461/1703"></figure>
+:::
+
+为什么数 sector：一条 warp 级的 global 访存指令，硬件按 32 字节 sector 为单位发出内存事务，碰到的 sector 越少，浪费的带宽越少。见 [CUDA C++ Best Practices Guide · Coalesced Access to Global Memory](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#coalesced-access-to-global-memory) 和 [CUDA C++ Programming Guide · Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。本题的 `copy_stats` 只数“碰到了几个 sector”，是这个模型最简单的版本。
+
+### 图 4 · 线程内部的连续性：`vector_elems`
+
+向量宽度看的是一个线程按 v 的顺序排出的 V 个地址。从 w = 8 往下试：先排除 `w·2 > 16` 字节和 V 不能被 w 整除的；剩下的 w 要求每一组 `v ∈ [g·w, (g+1)·w)` 地址逐个相差 2，并且组首地址是 `2w` 的倍数。所有线程都满足才算通过（图里画的是选中的线程，面板会报告第一个失败的线程）。试试：base 的 k0 = 2 时为什么 w = 4 不行；t16x8\_v2x2 的 v0→v1 为什么相差 128。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">一个线程的 V 个地址 → 能合并成多宽的访问</div><img src="../figs/a2/a2_new-05.png" alt="一个线程的 V 个地址 → 能合并成多宽的访问" loading="lazy" style="width:100%;aspect-ratio:1461/789"></figure>
+:::
+
+对照：真实 kernel 里 w 是由 Copy\_Atom 的类型决定的（例如`UniversalCopy<uint_byte_t<sizeof(Element)·size(val_layout)>>` ，见 [[cutlass:examples/cute/tutorial/tiled_copy.cu#L193-L196|tiled_copy.cu]] ；SM80 的 `cp.async` 128 位见 [[cutlass:examples/cute/tutorial/sgemm_sm80.cu#L368-L373|sgemm_sm80.cu]] ）。本题反过来问“最多能用多宽”。对齐要求来自硬件：向量 load/store 的地址必须是访问宽度的倍数，见 [CUDA C++ Programming Guide · Device Memory Accesses](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses)。
+
+### 图 5 · 两种连续性放在一起：`rank_variants`
+
+排名键是 `(instr_per_thread, total_sectors, name)` ：先比指令数（线程内部的连续性），再比 sector 数（线程之间的连续性），最后按名字。在 k0 = 0 时四个方案正好落在四个象限。切换 k0 看排名怎样变化：k0 = 2 时 base 的指令数变 2，但仍然排第一；k0 = 1 时所有方案都只能 w = 1（4 条指令），只剩 sector 数决定名次，base 掉到第 3，t8x16\_v4x1 反而第一。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">四种方案的指令数与 sector 数</div><img src="../figs/a2/a2_new-06.png" alt="四种方案的指令数与 sector 数" loading="lazy" style="width:100%;aspect-ratio:1461/801"></figure>
+:::
+
+### 速查：全部公式
+
+| 函数 | 公式 / 规则 | base 的值 |
+|---|---|---|
+| `thread_coord(thr_shape, thr_stride, t)` | 在所有 (tm,tk) 里找 `tm·s0 + tk·s1 = t` ；线程号必须恰好是 0..T−1 各一次，否则 ValueError | t=5 → (1,1)；行主序即 (t//4, t%4) |
+| `copy_coords(…)` | 线程 t 在外、v 在内：`(tm·VM + v%VM, tk·VK + v//VM)` ；tile = (TM·VM, TK·VK) | t=5 → (1,4) (1,5) (1,6) (1,7) |
+| `tv_index_map(…)` | 第 i 项：`t = i % T, v = i // T` ，取 `m + TILE_M·k` （即 `cs[t·V + v]` ） | [0, 128, 256, 384, 1,…] |
+| `byte_addr(m, k, m0, k0, ld, eb)` | `((m0+m)·ld + (k0+k))·eb` | (1,4) → 136 |
+| `vector_elems(…)` | w ∈ {8,4,2,1}，`w·eb ≤ 16` 、`V % w == 0` ；所有线程每组地址差 eb 且组首 % (w·eb) == 0，取最大的 | 4（k0=2 时 2） |
+| `copy_stats(…)` | 每 32 个线程一个 warp；每条指令 g 收集 `[a, a+vec_bytes)` 的 `byte // 32` 去重；efficiency = tile 字节 / (total·32) | [8,8,8,8]，32，1.0 |
+| `rank_variants(variants)` | 按 `(instr_per_thread, total_sectors, name)` 升序 | base, colthr,t8x16\_v4x1,t16x8\_v2x2 |
+
+记住两句话：线程之间看“同一条指令里 32 个 lane 的地址挤在几个 sector”（由 ThrLayout 决定邻居方向）；线程内部看“一个线程按 v 顺序的地址是否连续、对齐”（由 ValLayout 的形状和编号顺序、以及 tile 原点决定）。
+
 ## 逐步演示
 
 ::: steps 同样的 32×16 tile、128 个线程，四种分工

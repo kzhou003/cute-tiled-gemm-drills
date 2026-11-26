@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">A2 · Track A · 从零设计：五个空间映射问题 · 55 分钟 · 中</div><h1>A2 · 线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</h1><p class="lede">设计 Tiled GEMM 的第二个问题：128 个线程怎样协作把一个 32×16 的 A tile 从 global memory 搬走。本题从 ThrLayout = (32,4):(4,1) 和 ValLayout = (1,4) 出发，自己推出 (thread, value) → (m, k) 的 Copy TV 映射，和真实 make_tiled_copy 逐项对拍，再数两种连续性：一个 warp 碰到几个 sector、一个线程能发多宽的向量访问。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/a2_copy_tv.py"><code>mine/a2_copy_tv.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_a2_copy_tv.py"><code>tests/test_a2_copy_tv.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/a2_copy_tv.py"><code>solutions/a2_copy_tv.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="A2"> 我已完成这道题</label></header>
 <h2 id="a2-1">题面速览</h2>
@@ -304,7 +316,169 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="a2-3">图解：从两个小 layout 到一张 TV 表</h2>
 
 <figure class="flow"><div class="flow-head">make_tiled_copy 的推导<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;make_tiled_copy 的推导&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;thr&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;ThrLayout&quot;, &quot;s&quot;: &quot;(32,4):(4,1)&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;inv&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;线程号 → 坐标&quot;, &quot;s&quot;: &quot;求逆：(t//4, t%4)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;val&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;ValLayout&quot;, &quot;s&quot;: &quot;(1,4)&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rk&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;raked 组合&quot;, &quot;s&quot;: &quot;值在内、线程在外&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tv&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;Copy TV 映射&quot;, &quot;s&quot;: &quot;(t, v) → (m, k)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;两种连续性&quot;, &quot;s&quot;: &quot;sector · 向量宽度&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;thr&quot;, &quot;b&quot;: &quot;inv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;val&quot;, &quot;b&quot;: &quot;rk&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;inv&quot;, &quot;b&quot;: &quot;tv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;rk&quot;, &quot;b&quot;: &quot;tv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tv&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 230.0, &quot;rh&quot;: 96.0, &quot;nw&quot;: 180.0}}"></div><figcaption>CuTe 里同一件事是 <code>layout_tv = right_inverse(raked_product(thr, val))</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L495">make_tiled_copy</a>）。Track B 会用代数重写这一步，这里先用整数推导。</figcaption></figure>
-<h2 id="a2-4">逐步演示</h2>
+<h2 id="a2-4">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 128 个线程、32×16 的 tile。拿一个小到能把每个格子都写出来的例子手算一遍：8 个线程、每个线程 2 个值、一个 4×4 的 tile。把“谁搬哪个格子”画清楚之后，再放大到测试的运行例子，再看会让结果变差的反例，最后写成一般公式。</p>
+<p>① 小：ThrLayout (4,2):(2,1)，ValLayout (1,2)</p>
+<p>8 个线程 × 2 个值 = 4×4 的 tile，16 个格子全部能写出来。</p>
+<pre><code>线程 5 → (tm,tk) = (2,1) → 搬 (2,2) (2,3)
+tv_index_map = [0,8,1,9,2,10,3,11,
+4,12,5,13,6,14,7,15]
+vector_elems = 2，1 条指令，4 个 sector
+</code></pre>
+<p>② 运行例子：base (32,4):(4,1)，(1,4)</p>
+<p>测试里的 128 个线程、32×16 tile。规则和 ① 完全一样，只是数字变大。</p>
+<pre><code>线程 5 → (1,1) → 搬 (1,4) (1,5) (1,6)
+(1,7)
+vector_elems = 4（8 字节），1 条指令
+sectors_per_warp = [8,8,8,8]，效率 1.0
+</code></pre>
+<p>③ 反例：只改一个参数</p>
+<p>线程 stride 改成 (1,32)、或者把 tile 原点挪到 k0 = 2。</p>
+<pre><code>colthr：每个 warp 32 个 sector，共 128，效
+率 0.25
+base, k0=2：w 掉到 2，2 条指令，共 96 个
+sector
+t16x8_v2x2：v0、v1 上下相邻 → w = 1，4 条指
+令
+</code></pre>
+<p>④ 一般</p>
+<p>把 ①–③ 里反复用到的规则写成公式。</p>
+<pre><code>(tm,tk) = ThrLayout⁻¹(t)
+(m,k)   = (tm·VM + v%VM, tk·VK + v//VM)
+TV[t + T·v] = m + TILE_M·k
+addr    = ((m0+m)·ld + (k0+k))·2
+</code></pre>
+<p><strong>✎</strong> 草稿纸：ThrLayout (4,2):(2,1)，ValLayout (1,2)，ld = 64，half（2 字节）</p>
+<pre><code class="language-text">1) 线程布局求逆   t = tm·2 + tk·1，把 8 个坐标全部代进去：
+        (0,0)→0  (0,1)→1  (1,0)→2  (1,1)→3  (2,0)→4  (2,1)→5  (3,0)→6  (3,1)→7
+   0..7 各出现一次 → 是双射。反过来读：thread_coord(t) = (t // 2, t % 2)，例如 t=5 → (2,1) 2) tile 形状 = (TM·VM, TK·VK) = (4·1, 2·2) = (4, 4)；每个线程的小块是 1×2（同一行两个相邻格子）
+   线程 5 = (2,1)：v=0 → (2·1 + 0%1, 1·2 + 0//1) = (2,2)
+                   v=1 → (2·1 + 1%1, 1·2 + 1//1) = (2,3)
+   整张 tile（格子里写 t·v）：
+              k=0    k=1    k=2    k=3
+        m=0   t0·v0  t0·v1  t1·v0  t1·v1
+        m=1   t2·v0  t2·v1  t3·v0  t3·v1
+        m=2   t4·v0  t4·v1  t5·v0  t5·v1
+        m=3   t6·v0  t6·v1  t7·v0  t7·v1        ← 16 格恰好各一次
+3) TV 表：第 i = t + 8·v 项 = m + 4·k（t 变化最快）
+   i = 0..7  (v=0)：t0..t7 的 v0 = (0,0)(0,2)(1,0)(1,2)(2,0)(2,2)(3,0)(3,2) → 0, 8, 1, 9, 2, 10, 3, 11
+   i = 8..15 (v=1)：t0..t7 的 v1 = (0,1)(0,3)(1,1)(1,3)(2,1)(2,3)(3,1)(3,3) → 4, 12,
+5, 13, 6, 14, 7, 15
+4) 字节地址 (m·64 + k)·2：线程 5 的 v0 = (2·64 + 2)·2 = 260，v1 = (2·64 + 3)·2 = 262
+   vector_elems：w=8、w=4 跳过（V = 2 不能整除）；w=2：260 → 262 相差 2 ✓，260 % 4 = 0 ✓
+   8 个线程都满足 → w = 2，vec_bytes = 4，instr_per_thread = 2 // 2 = 1
+   换成 k0 = 1：线程 0 的组首 = (0·64 + 1)·2 = 2，2 % 4 ≠ 0 → w=2 失败 → w = 1，2 条指令
+5) sector（32 字节一格，sector 号 = byte // 32）：8 个线程都在 warp 0，只有 1 条指令
+   第 m 行的 tile 占字节 [128m, 128m + 8) → 都在 sector 4m 里 → {0, 4, 8, 12} = 4 个
+   efficiency = tile 字节数 / (sector 数·32) = 32 / 128 = 0.25   ← tile 一行只有 8 字节，每个 sector 只用到 1/4
+   换成列主序线程 (4,2):(1,4)：线程 1 = (1,0) 搬 (1,0)(1,1)，格子换了主人，但同一个 warp 碰到的 sector 还是这 4 个
+   → 小例子整张 tile 都在同一个 warp 里，看不出“线程之间的连续性”。这要到 ② 的规模才看得出来：
+6) 放大到 base：warp 0 = 线程 0..31 = 第 0..7 行，每行 4 个线程 × 8 字节 = 32 字节 = 正好 1个 sector → 8 个
+   colthr (1,32)：warp 0 = 线程 0..31 = 第 0..31 行的 k = 0..3，每个 lane 一行 → 32 个
+sector，每个只用 8 字节
+</code></pre>
+<p>下面这张图可以随意改小参数（tile 每一维不超过 8）。左上是线程布局（格子里是线程号），左下是值布局（格子里是值号 v），右边是 tile：每个格子写着它归哪个线程 t、是这个线程的第几个值 v，粗框是一个线程的小块。底下一行是 <code>tv_index_map</code> 的取值表。下方面板打印你的函数对这组参数应该返回的结果。先用默认预设对照草稿纸，再切到“(1,1) 非双射”看</p>
+<p><code>thread_coord</code> 为什么要报错。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 小尺寸 TV 映射</div><img src="../figs/a2/a2_new-01.png" alt="手算草稿 · 小尺寸 TV 映射" loading="lazy" style="width:100%;aspect-ratio:1461/1605"></figure>
+<h2 id="a2-5">图解详解：TV 映射、sector 与向量宽度</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>这一节把整道题拆成五张可交互的图，每张对应一两个要实现的函数。四种方案都能切换。下方黑底面板会把当前状态逐步代入公式。先看整道题在一个 kernel 里对应什么（伪代码，只保留坐标和地址部分）：</p>
+<pre><code>t = threadIdx.x                                   # 0..127
+tm, tk = thread_coord(thr_shape, thr_stride, t)   # ①  线程布局求逆（图 1）
+for g in range(V // w):                           # ③  每个线程发 V/w 条访存指令（w = vector_e
+    vs = range(g*w, (g+1)*w)                      #    第 g 条指令搬值 v = g·w .. g·w+w-1
+    m, k = tm*VM + vs[0] % VM, tk*VK + vs[0] // VM    # ②  raked 公式 → tile 坐标（图 1、图 2
+    a = byte_addr(m, k, m0, k0, ld)               #    一个 warp 的 32 个 a 落在几个 32 字节
+    reg[vs] = load_w_halves(A_bytes + a)          #    LDG.64 (w=4) / LDG.32 (w=2) / LDG.1
+</code></pre>
+<h3 id="a2-5-1">图 1 · 线程布局求逆 + raked：<code>thread_coord</code> / <code>copy_coords</code></h3>
+<p>左边是 ThrLayout：格子 (tm, tk) 里写的是 <code>t = tm·s0 + tk·s1</code> 。搬运时线程只知道自己的 t，所以要反过来在左图里找到写着 t 的格子，得到 (tm, tk)。右边是 32×16 的 tile，每个格子写着搬它的线程号，颜色表示 warp（t // 32）。拖动 t 或者点播放，看高亮的 V 个格子（写着 v0..v3）怎样在 tile 上移动：</p>
+<ul>
+<li>base：t 每加 1，向右挪 4 列；每 4 个线程换一行。一个 warp（同一种颜色）是 8 整行。</li>
+<li>colthr：t 每加 1，向下挪 1 行；一个 warp 是第 0 列块的 32 行。每个线程搬的东西和 base 一样宽，只是邻居换了方向。</li>
+<li>t16x8_v2x2：每个线程是 2×2 小块，v0、v1 上下相邻（值按列主序编号）。t8x16_v4x1：每个线程是一列上的 4 个格子。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">32×16 tile 上的 Copy TV 映射</div><img src="../figs/a2/a2_new-02.png" alt="32×16 tile 上的 Copy TV 映射" loading="lazy" style="width:100%;aspect-ratio:1461/1681"></figure>
+<p>对照源码：<code>make_tiled_copy</code> 先做 <code>raked_product(thr_layout, val_layout)</code> （得到 (m,k) → (thread, value)），再 <code>right_inverse</code> 得到 (thread, value) → (m,k)，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L490-L516">make_tiled_copy</a> ；<code>raked_product</code> 本身在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1784-L1800">layout.hpp</a> ，<code>right_inverse</code> 在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1305">layout.hpp</a> 。每个线程拿到自己那份的是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L365-L373">partition_S</a> 。CuTe 官方教程里一个完全同构的例子（<code>thr_layout (32,8)</code> 、<code>val_layout (4,1)</code> ）在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/tiled_copy.cu#L182-L209">tiled_copy.cu</a> 。</p>
+<h3 id="a2-5-2">图 2 · TV 表的下标顺序：<code>tv_index_map</code></h3>
+<p><code>copy_coords</code> 按“线程在外、值在内”列出坐标（t-major），而 CuTe 的 <code>get_layoutS_TV()</code> 是一个形状为 (T, V) 的</p>
+<p>layout，它的一维取值表按 colex 顺序排列：t 变化最快。所以第 i 项是 <code>t = i % 128, v = i // 128</code> 。下面把这张表画成 V 行 × 128 列（一行一个 v），一次看 16 个线程。格子里是 <code>m + 32·k</code> （tile 的列主序下标），小字是 (m,k)。注意 i 是沿一行增长的，读完 128 个线程的 v0 才轮到 v1。</p>
+
+<figure class="flow snap"><div class="flow-head">tv_index_map = get_layoutS_TV() 的取值表</div><img src="../figs/a2/a2_new-03.png" alt="tv_index_map = get_layoutS_TV() 的取值表" loading="lazy" style="width:100%;aspect-ratio:1461/909"></figure>
+<p>源码对照：<code>get_layoutS_TV()</code> 的定义在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L318-L326">copy_atom.hpp</a> ；layout 的一维下标按 colex 顺序拆成多维坐标的规则见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/01_layout.md">CuTe 文 档 01_layout.md</a>。</p>
+<h3 id="a2-5-3">图 3 · 线程之间的连续性：一个 warp 的一条指令碰几个 sector</h3>
+<p>这张图画的是 global memory 本身：A 是行主序、ld = 64 个 half，所以 A 的每一行是 128 字节 = 4 个 sector。图里每行只画前 64 字节（2 个 sector，中间的竖虚线是 sector 边界），足够装下 32 字节宽的 tile 行（虚线框，从第 k0 个元素开始）。选一个 warp 和它的第 g 条指令：彩色格子是这条指令里 32 个 lane 实际读的字节（颜色 = lane % 8），橙色框是被碰到的 sector。sector 号 = <code>byte // 32</code> ，第 m 行的两个 sector 号是 4m 和 4m+1。</p>
+<ul>
+<li>base：warp 0 只占 8 行，每行正好 1 个 sector 全用满 → 8 个。</li>
+<li>colthr：warp 0 占 32 行，每行只读 8 字节，却要碰 1 个 sector → 32 个，每个只用 1/4。</li>
+<li>t8x16_v4x1：每条指令只读 2 字节，但 32 个 lane 拼成 2 整行 → 每条指令 2 个 sector，4 条共 8 个。</li>
+<li>k0 = 2：tile 行跨过 sector 边界，每行要碰 2 个 sector；而且 w 从 4 掉到 2，指令数翻倍。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">一个 warp、一条指令的 sector 计数</div><img src="../figs/a2/a2_new-04.png" alt="一个 warp、一条指令的 sector 计数" loading="lazy" style="width:100%;aspect-ratio:1461/1703"></figure>
+<p>为什么数 sector：一条 warp 级的 global 访存指令，硬件按 32 字节 sector 为单位发出内存事务，碰到的 sector 越少，浪费的带宽越少。见 <a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#coalesced-access-to-global-memory">CUDA C++ Best Practices Guide · Coalesced Access to Global Memory</a> 和 <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses">CUDA C++ Programming Guide · Device Memory Accesses</a>。本题的 <code>copy_stats</code> 只数“碰到了几个 sector”，是这个模型最简单的版本。</p>
+<h3 id="a2-5-4">图 4 · 线程内部的连续性：<code>vector_elems</code></h3>
+<p>向量宽度看的是一个线程按 v 的顺序排出的 V 个地址。从 w = 8 往下试：先排除 <code>w·2 &gt; 16</code> 字节和 V 不能被 w 整除的；剩下的 w 要求每一组 <code>v ∈ [g·w, (g+1)·w)</code> 地址逐个相差 2，并且组首地址是 <code>2w</code> 的倍数。所有线程都满足才算通过（图里画的是选中的线程，面板会报告第一个失败的线程）。试试：base 的 k0 = 2 时为什么 w = 4 不行；t16x8_v2x2 的 v0→v1 为什么相差 128。</p>
+
+<figure class="flow snap"><div class="flow-head">一个线程的 V 个地址 → 能合并成多宽的访问</div><img src="../figs/a2/a2_new-05.png" alt="一个线程的 V 个地址 → 能合并成多宽的访问" loading="lazy" style="width:100%;aspect-ratio:1461/789"></figure>
+<p>对照：真实 kernel 里 w 是由 Copy_Atom 的类型决定的（例如<code>UniversalCopy&lt;uint_byte_t&lt;sizeof(Element)·size(val_layout)&gt;&gt;</code> ，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/tiled_copy.cu#L193-L196">tiled_copy.cu</a> ；SM80 的 <code>cp.async</code> 128 位见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu#L368-L373">sgemm_sm80.cu</a> ）。本题反过来问“最多能用多宽”。对齐要求来自硬件：向量 load/store 的地址必须是访问宽度的倍数，见 <a href="https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#device-memory-accesses">CUDA C++ Programming Guide · Device Memory Accesses</a>。</p>
+<h3 id="a2-5-5">图 5 · 两种连续性放在一起：<code>rank_variants</code></h3>
+<p>排名键是 <code>(instr_per_thread, total_sectors, name)</code> ：先比指令数（线程内部的连续性），再比 sector 数（线程之间的连续性），最后按名字。在 k0 = 0 时四个方案正好落在四个象限。切换 k0 看排名怎样变化：k0 = 2 时 base 的指令数变 2，但仍然排第一；k0 = 1 时所有方案都只能 w = 1（4 条指令），只剩 sector 数决定名次，base 掉到第 3，t8x16_v4x1 反而第一。</p>
+
+<figure class="flow snap"><div class="flow-head">四种方案的指令数与 sector 数</div><img src="../figs/a2/a2_new-06.png" alt="四种方案的指令数与 sector 数" loading="lazy" style="width:100%;aspect-ratio:1461/801"></figure>
+<h3 id="a2-5-6">速查：全部公式</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>公式 / 规则</th>
+<th>base 的值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>thread_coord(thr_shape, thr_stride, t)</code></td>
+<td>在所有 (tm,tk) 里找 <code>tm·s0 + tk·s1 = t</code> ；线程号必须恰好是 0..T−1 各一次，否则 ValueError</td>
+<td>t=5 → (1,1)；行主序即 (t//4, t%4)</td>
+</tr>
+<tr>
+<td><code>copy_coords(…)</code></td>
+<td>线程 t 在外、v 在内：<code>(tm·VM + v%VM, tk·VK + v//VM)</code> ；tile = (TM·VM, TK·VK)</td>
+<td>t=5 → (1,4) (1,5) (1,6) (1,7)</td>
+</tr>
+<tr>
+<td><code>tv_index_map(…)</code></td>
+<td>第 i 项：<code>t = i % T, v = i // T</code> ，取 <code>m + TILE_M·k</code> （即 <code>cs[t·V + v]</code> ）</td>
+<td>[0, 128, 256, 384, 1,…]</td>
+</tr>
+<tr>
+<td><code>byte_addr(m, k, m0, k0, ld, eb)</code></td>
+<td><code>((m0+m)·ld + (k0+k))·eb</code></td>
+<td>(1,4) → 136</td>
+</tr>
+<tr>
+<td><code>vector_elems(…)</code></td>
+<td>w ∈ {8,4,2,1}，<code>w·eb ≤ 16</code> 、<code>V % w == 0</code> ；所有线程每组地址差 eb 且组首 % (w·eb) == 0，取最大的</td>
+<td>4（k0=2 时 2）</td>
+</tr>
+<tr>
+<td><code>copy_stats(…)</code></td>
+<td>每 32 个线程一个 warp；每条指令 g 收集 <code>[a, a+vec_bytes)</code> 的 <code>byte // 32</code> 去重；efficiency = tile 字节 / (total·32)</td>
+<td>[8,8,8,8]，32，1.0</td>
+</tr>
+<tr>
+<td><code>rank_variants(variants)</code></td>
+<td>按 <code>(instr_per_thread, total_sectors, name)</code> 升序</td>
+<td>base, colthr,t8x16_v4x1,t16x8_v2x2</td>
+</tr>
+</tbody>
+</table></div>
+<p>记住两句话：线程之间看“同一条指令里 32 个 lane 的地址挤在几个 sector”（由 ThrLayout 决定邻居方向）；线程内部看“一个线程按 v 顺序的地址是否连续、对齐”（由 ValLayout 的形状和编号顺序、以及 tile 原点决定）。</p>
+<h2 id="a2-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ 同样的 32×16 tile、128 个线程，四种分工</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;base&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;base&quot;, &quot;s&quot;: &quot;1 条指令 · 32 sector&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;col&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;colthr&quot;, &quot;s&quot;: &quot;1 条指令 · 128 sector&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;v41&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;t8x16_v4x1&quot;, &quot;s&quot;: &quot;4 条指令 · 32 sector&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;v22&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;t16x8_v2x2&quot;, &quot;s&quot;: &quot;4 条指令 · 64 sector&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 210.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 180.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="base"><div class="step-title">1. 文档的方案 base</div><p><code>ThrLayout (32,4):(4,1)</code>：线程 t 的坐标是 <code>(t // 4, t % 4)</code>；<code>ValLayout (1,4)</code>：4 个值在同一行。线程 5 搬 (1,4) (1,5) (1,6) (1,7)（真实 CuTe 的 <code>partition_S</code> 也是这四个）。每个 warp 32 个线程覆盖 8 整行 × 32 字节 = 8 个 sector；每个线程 8 字节连续 → 1 条指令。4 个 warp 共 32 个 sector，效率 1.0。</p>
 </div><div class="step" data-hl="col"><div class="step-title">2. 线程列主序 colthr</div><p>同样的形状，stride 改成 <code>(1,32)</code>：相邻 lane 沿 M 往下走。每个线程仍有 8 字节连续（1 条指令），但一个 warp 的 32 个 lane 落在 32 个不同的行上，每行碰一个 sector：每个 warp 32 个 sector，总共 128 个，效率只有 0.25。<strong>线程内部连续，线程之间不连续。</strong></p>
@@ -312,7 +486,7 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="v22"><div class="step-title">4. 2×2 小块 t16x8_v2x2</div><p><code>ValLayout (2,2)</code> 按列主序编号，v0、v1 是上下相邻的两个元素，v0、v2 才在同一行。按值的顺序看没有连续的两个 → 4 条指令；每个 warp 4 条指令共碰 16 个 sector，总共 64 个。排名：<code>base &lt; colthr &lt; t8x16_v4x1 &lt; t16x8_v2x2</code>（先比指令数，再比 sector）。</p>
 </div></div></div>
 <p>再看一个容易忽略的点：同样是 base 方案，如果 tile 原点 <code>k0 = 2</code>（不是 4 的倍数），每组 4 个值的起点只有 4 字节对齐，向量宽度掉到 2，指令数变 2，每个 warp 碰 24 个 sector，总数 96。文档说“每线程 4 个连续 half 是 8 bytes 的连续数据，但最终能否发出某种特定宽度的向量 load/store，还要看地址对齐”，说的就是这种情况。</p>
-<h2 id="a2-5">易错点</h2>
+<h2 id="a2-7">易错点</h2>
 <ul>
 <li><strong>忘了求逆。</strong> ThrLayout 是“坐标 → 线程号”，不是“线程号 → 坐标”。<code>(32,4):(4,1)</code> 的线程 5 在 (1,1)，不在 (5,0)。测试 <code>test_thread_coord_inverts_thread_layout</code>。</li>
 <li><strong>值按行主序编号。</strong> CuTe 的值按 colex（列主序）编号。<code>test_values_are_numbered_colex</code> 用 t16x8_v2x2 抓这个：v1 是 (1,0)，不是 (0,1)。</li>
@@ -320,12 +494,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>只看线程内部连续。</strong> colthr 每个线程 8 字节连续，但 sector 数是 base 的 4 倍。测试 <code>test_stats_two_kinds_of_contiguity</code>。</li>
 <li><strong>忘了对齐。</strong> 连续不等于能发向量指令。测试 <code>test_misaligned_origin_shrinks_vector</code>。</li>
 </ul>
-<h2 id="a2-6">对照文档</h2>
+<h2 id="a2-8">对照文档</h2>
 <blockquote>
 <p>“这里必须同时检查两种连续性：线程之间的连续性：同一个 warp 的不同 lane 访问的地址是否集中、连续，能否减少 Global Memory transaction。线程内部的连续性：同一个线程负责的多个 value 是否连续、对齐，能否合并成向量化访问。这两个条件不是一回事。……于是我们需要一张表，把‘线程 t 的第 v 个 value’映射到 tile 的矩阵坐标：Copy TV Layout: (t,v) → (m,k)。”</p>
 </blockquote>
 <p>本题的四种方案正好把“两个条件不是一回事”拆成了四个象限：两种都好（base）、只有线程内部好（colthr）、只有线程之间好（t8x16_v4x1）、都不好（t16x8_v2x2）。</p>
-<h2 id="a2-7">上机验证</h2>
+<h2 id="a2-9">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/a2_copy_tv.cpp     # 真实 CuTe 的 make_tiled_copy
 ./check.sh oracle a2                            # 重新生成 tests/golden/a2_copy_tv.json
 </code></pre>
@@ -339,7 +513,7 @@ thread   5 : (1,4) (1,5) (1,6) (1,7)
 thread 127 : (31,12) (31,13) (31,14) (31,15)
 </code></pre>
 <p>读 TV layout：线程号 t 拆成 <code>(t % 4, t // 4)</code>，对应列主序下标的 stride <code>(128, 1)</code>，即 k 组 ×128（4 列 × 32 行）和 m ×1；值 v 的 stride 是 32（下一列）。所以线程 t 的第 v 个值在下标 <code>128·(t%4) + t//4 + 32·v</code>，也就是 <code>m = t//4, k = 4·(t%4) + v</code>。golden 里用的是 1 个 half 的 atom，打印成 <code>((_4,_32),(_1,_4)):((_128,_1),(_0,_32))</code>：形状不同，取值表完全相同。</p>
-<h2 id="a2-8">三级提示</h2>
+<h2 id="a2-10">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">thread_coord((32, 4), (4, 1), 5)               # (1, 1)
 copy_coords((32, 4), (4, 1), (1, 4))[20:24]    # [(1, 4), (1, 5), (1, 6), (1, 7)]
@@ -370,7 +544,7 @@ rank_variants(VARIANTS)    # ['base', 'colthr', 't8x16_v4x1', 't16x8_v2x2']
 <li>向量访问取的是“按值顺序相邻”的几个值：CuTe 的 copy atom 一次拿 ValLayout 的前 w 个值，v0 和 v1 上下相邻、地址差 128 字节，所以不能合并。想让 v0、v1 同行，ValLayout 要写成 <code>(2,2):(2,1)</code>（行主序编号）。</li>
 </ol>
 </div></details></div></details>
-<h2 id="a2-9">参考解</h2>
+<h2 id="a2-11">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/a2_copy_tv.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/a2_copy_tv.py</span><span class="muted small">224 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;A2 · 线程怎样搬数据：Copy TV 映射、sector 与向量宽度 — reference solution.
 
@@ -596,7 +770,7 @@ def rank_variants(variants, m0=0, k0=0, ld=64, elem_bytes=2) -&gt; list:
         s = copy_stats(*variants[name], m0=m0, k0=k0, ld=ld, elem_bytes=elem_bytes)
         return (s[&quot;instr_per_thread&quot;], s[&quot;total_sectors&quot;], name)
     return sorted(variants, key=key)</code></pre></div></div></details>
-<h2 id="a2-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="a2-12">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li><code>make_tiled_copy</code> 返回的 TiledCopy 有一个 <code>Tiler_MN</code>。它和 ThrLayout、ValLayout 的 shape 是什么关系？（对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L495">make_tiled_copy</a> 里 <code>product_each(shape(layout_mn))</code>。）</li>
 <li>SM80 教程为什么用 <code>(16,8):(8,1)</code> 个线程、每线程 8 个 half？这比本题的 (32,4) × (1,4) 好在哪里？（提示：16 字节 <code>cp.async</code>，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/arch/copy_sm80.hpp#L47">SM80_CP_ASYNC_CACHEALWAYS</a>。）</li>
@@ -610,13 +784,21 @@ def rank_variants(variants, m0=0, k0=0, ld=64, elem_bytes=2) -&gt; list:
 <a class="o2" href="#a2-1">题面速览</a>
 <a class="o2" href="#a2-2">直觉与类比</a>
 <a class="o2" href="#a2-3">图解：从两个小 layout 到一张 TV 表</a>
-<a class="o2" href="#a2-4">逐步演示</a>
-<a class="o2" href="#a2-5">易错点</a>
-<a class="o2" href="#a2-6">对照文档</a>
-<a class="o2" href="#a2-7">上机验证</a>
-<a class="o2" href="#a2-8">三级提示</a>
-<a class="o2" href="#a2-9">参考解</a>
-<a class="o2" href="#a2-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#a2-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#a2-5">图解详解：TV 映射、sector 与向量宽度</a>
+<a class="o3" href="#a2-5-1">图 1 · 线程布局求逆 + raked：thread_coord / copy_coords</a>
+<a class="o3" href="#a2-5-2">图 2 · TV 表的下标顺序：tv_index_map</a>
+<a class="o3" href="#a2-5-3">图 3 · 线程之间的连续性：一个 warp 的一条指令碰几个 sector</a>
+<a class="o3" href="#a2-5-4">图 4 · 线程内部的连续性：vector_elems</a>
+<a class="o3" href="#a2-5-5">图 5 · 两种连续性放在一起：rank_variants</a>
+<a class="o3" href="#a2-5-6">速查：全部公式</a>
+<a class="o2" href="#a2-6">逐步演示</a>
+<a class="o2" href="#a2-7">易错点</a>
+<a class="o2" href="#a2-8">对照文档</a>
+<a class="o2" href="#a2-9">上机验证</a>
+<a class="o2" href="#a2-10">三级提示</a>
+<a class="o2" href="#a2-11">参考解</a>
+<a class="o2" href="#a2-12">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

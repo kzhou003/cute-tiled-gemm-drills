@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F5 · 在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</title>
+
+<style>
+/* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
+:root {
+  --bg: #f7f6f2; --surface: #ffffff; --surface-2: #f0eee8; --border: #dedad0;
+  --text: #22211e; --muted: #6b675e; --accent: #2f6fdb; --accent-soft: #e3ecfb;
+  --code-bg: #f3f1ea; --hl: #ffb020; --hl-soft: #fff1d6;
+  --l1: #2e8b57; --l1-soft: #e4f3ea; --l2: #b7791f; --l2-soft: #fbf0dc; --l3: #c0392b; --l3-soft: #fbe5e2;
+  --ok: #2e8b57; --bad: #c0392b; --warn: #b7791f; --idea: #7a4fc4;
+  --tk-kw: #8a3ab9; --tk-str: #2f7d32; --tk-num: #b5541c; --tk-com: #8a867c; --tk-fn: #2457b8; --tk-type: #0f7b8a;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04); --radius: 10px;
+  --font: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei",
+          system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
+  --left: 268px; --right: 220px; color-scheme: light;
+  /* diagram palette */
+  --f-dot: #d9d5cb; --f-acc: #2f6fdb; --f-acc-bg: #e3ecfb; --f-warn: #b7791f; --f-warn-bg: #fbf0dc; --f-pass: #2e8b57;
+  --f-pass-bg: #e4f3ea; --f-vio: #7a4fc4; --f-vio-bg: #efe8fb; --f-teal: #0f7b8a; --f-teal-bg: #e0f2f4;
+  --f-todo: #c0392b; --f-todo-bg: #fbe5e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; } }
+:root[data-theme="dark"] {
+  --bg: #17181b; --surface: #1f2125; --surface-2: #26282d; --border: #363a41; --text: #e6e4df; --muted: #a19d94;
+  --accent: #7aa7ff; --accent-soft: #23314d; --code-bg: #1b1d21; --hl: #ffc14d; --hl-soft: #3a2f14;
+  --l1: #5cc98b; --l1-soft: #1d3327; --l2: #e6b25c; --l2-soft: #3a2f1b; --l3: #f08070; --l3-soft: #3d2320;
+  --ok: #5cc98b; --bad: #f08070; --warn: #e6b25c; --idea: #b79cf0;
+  --tk-kw: #d19ef0; --tk-str: #8fd18f; --tk-num: #f0a35e; --tk-com: #7f7b73; --tk-fn: #8cb4ff; --tk-type: #5cc9d6;
+  --shadow: 0 1px 2px rgba(0,0,0,.4); color-scheme: dark;
+  --f-dot: #30333a; --f-acc: #7aa7ff; --f-acc-bg: #23314d; --f-warn: #e6b25c; --f-warn-bg: #3a2f1b; --f-pass: #5cc98b;
+  --f-pass-bg: #1d3327; --f-vio: #b79cf0; --f-vio-bg: #2c2440; --f-teal: #5cc9d6; --f-teal-bg: #163238;
+  --f-todo: #f08070; --f-todo-bg: #3d2320; }
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.78 var(--font); overflow-x: hidden; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.btn { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px;
+  padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; line-height: 1.5; }
+.btn:hover:not(:disabled) { border-color: var(--accent); } .btn:disabled { opacity: .4; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- layout: left nav · content · right outline (code-wiki style) ---------- */
+.layout { display: grid; grid-template-columns: var(--left) minmax(0, 1fr); }
+.layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr) var(--right); }
+.sidebar, .outline { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; scrollbar-width: thin; }
+.sidebar { border-right: 1px solid var(--border); padding: 18px 10px 40px 16px; font-size: 13.2px; }
+.sidebar .brand { display: block; font-weight: 800; font-size: 15px; margin: 0 0 12px 6px; color: var(--text); }
+.sidebar a { display: block; padding: 2px 8px; border-radius: 6px; color: var(--text); line-height: 1.5; }
+.sidebar a:hover, .outline a:hover { background: var(--surface-2); text-decoration: none; }
+.sidebar .nav-group { margin: 14px 0 2px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+.sidebar a.nav-l2 { font-weight: 650; margin-top: 6px; }
+.sidebar a.nav-l3 { padding-left: 20px; color: var(--muted); font-size: 12.6px; }
+.sidebar a.cur, .outline a.cur { background: var(--accent-soft); color: var(--accent); }
+.sidebar a .nid { font: 700 12px var(--mono); color: var(--accent); margin-right: 6px; }
+.sidebar a.done .nid::after { content: " ✓"; color: var(--ok); }
+.outline { border-left: 1px solid var(--border); padding: 22px 12px 40px; font-size: 12.6px; }
+.outline .ttl { font-weight: 700; color: var(--muted); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 8px 6px; }
+.outline a { display: block; padding: 2px 6px; border-radius: 6px; color: var(--muted); line-height: 1.45; }
+.outline a.o3 { padding-left: 16px; }
+main { max-width: 940px; padding: 28px 40px 90px; min-width: 0; }
+.cover { padding: 30px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cover .kicker { font: 700 12px var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.cover h1 { font-size: 33px; line-height: 1.25; margin: 10px 0 10px; letter-spacing: -.01em; }
+.cover .lede { color: var(--muted); margin: 6px 0; font-size: 16px; }
+.cover .meta { font: 12.5px var(--mono); color: var(--muted); }
+.pager { display: flex; justify-content: space-between; gap: 12px; margin: 48px 0 0; padding-top: 14px; border-top: 1px solid var(--border); }
+.theme-btn { position: fixed; right: 16px; bottom: 16px; z-index: 20; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 6px 12px; font: 13px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+
+/* ---------- typography ---------- */
+h2 { font-size: 25px; margin: 60px 0 12px; padding-top: 10px; border-top: 2px solid var(--text); letter-spacing: -.01em; }
+h3 { font-size: 19px; margin: 34px 0 8px; } h4 { font-size: 16px; margin: 22px 0 6px; }
+p, li { text-wrap: pretty; }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: 12.8px; overflow-wrap: normal; }
+a.src { font: 0.86em var(--mono); background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+a.src::after { content: " ↗"; font-size: .85em; }
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+th, td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--surface-2); font-weight: 650; }
+th:first-child, td:first-child { min-width: 5.5em; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--border); color: var(--muted); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+/* ---------- callouts ---------- */
+.callout { margin: 16px 0; padding: 10px 16px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); border-left-width: 4px; }
+.callout > :first-child { margin-top: 4px; } .callout > :last-child { margin-bottom: 4px; }
+.callout-title { font-weight: 700; margin-bottom: 2px; }
+.callout.key, .callout.info { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.callout.key > .callout-title, .callout.info > .callout-title { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.callout.warn > .callout-title { color: var(--warn); }
+.callout.ok { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.callout.idea { border-left-color: var(--idea); background: color-mix(in srgb, var(--idea) 7%, var(--surface)); }
+.callout.idea > .callout-title { color: var(--idea); }
+.callout.analogy { border-left-color: #d9822b; background: color-mix(in srgb, #d9822b 7%, var(--surface)); }
+.callout.analogy > .callout-title { color: #b8691c; }
+
+/* ---------- hints / answers / solutions ---------- */
+details.hint, details.solution { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+details.hint > summary, details.solution > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-weight: 650; border-radius: var(--radius); }
+details > summary::-webkit-details-marker { display: none; }
+details.hint > summary::after, details.solution > summary::after { content: "▸"; margin-left: auto; color: var(--muted); }
+details[open].hint > summary::after, details[open].solution > summary::after { content: "▾"; }
+details[open].hint > summary, details[open].solution > summary { border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+details.hint > .body, details.solution > .body { padding: 6px 16px 14px; }
+.lvl { display: inline-block; border-radius: 6px; padding: 0 8px; font-size: 12px; font-weight: 700; color: #fff; }
+details.hint.l1 > summary { background: var(--l1-soft); } details.hint.l1 .lvl { background: var(--l1); }
+details.hint.l2 > summary { background: var(--l2-soft); } details.hint.l2 .lvl { background: var(--l2); }
+details.hint.l3 > summary { background: var(--l3-soft); } details.hint.l3 .lvl { background: var(--l3); }
+details.solution > summary { background: var(--l3-soft); } details.solution .lvl { background: var(--l3); }
+.spoiler-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+details.answer { margin: 10px 0; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface); }
+details.answer > summary { cursor: pointer; padding: 6px 12px; color: var(--accent); font-size: 14px; }
+details.answer > .body { padding: 2px 14px 10px; }
+
+/* ---------- code boxes ---------- */
+.codebox { margin: 14px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.code-head .path { font-family: var(--mono); font-weight: 600; } .code-head .btn { margin-left: auto; padding: 1px 8px; font-size: 12px; }
+.codebox pre { margin: 0; border: 0; border-radius: 0; max-height: 560px; }
+.hljs-keyword, .hljs-built_in { color: var(--tk-kw); } .hljs-string { color: var(--tk-str); } .hljs-number { color: var(--tk-num); }
+.hljs-comment { color: var(--tk-com); font-style: italic; } .hljs-title, .hljs-title.function_ { color: var(--tk-fn); }
+.hljs-type, .hljs-class .hljs-title { color: var(--tk-type); } .hljs-meta { color: var(--warn); }
+
+/* ---------- stepper (step-through animation) ---------- */
+.stepper { margin: 18px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.stepper > .st-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
+.stepper .st-title { font-weight: 650; } .stepper .st-count { color: var(--muted); font: 13px var(--mono); }
+.stepper .st-ctrl { margin-left: auto; display: flex; gap: 6px; }
+.stepper .st-dots { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0; }
+.stepper .st-dot { width: 26px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 11px var(--mono); cursor: pointer; padding: 0; }
+.stepper .st-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepper .st-dot.seen:not(.on) { border-color: var(--accent); color: var(--accent); }
+.stepper .st-diagram { padding: 10px 12px 0; } .stepper .st-diagram figure.flow { margin: 0; box-shadow: none; }
+.stepper .step { padding: 8px 16px 12px; }
+.stepper .step > .step-title { font-weight: 650; margin: 4px 0 6px; color: var(--accent); }
+.stepper.js .step { display: none; } .stepper.js .step.active { display: block; animation: fadein .22s ease; }
+.stepper:not(.js) .step + .step { border-top: 1px dashed var(--border); }
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- tabs ---------- */
+.tabs { margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tab-heads { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0; }
+.tab-btn { border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); padding: 4px 12px; border-radius: 8px 8px 0 0; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tab-btn.on { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 650; margin-bottom: -1px; }
+.tab-pane { display: none; padding: 4px 16px 10px; } .tab-pane.on { display: block; }
+
+/* ---------- cells ---------- */
+.cells { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.cell { display: inline-block; min-width: 24px; padding: 0 5px; text-align: center; border: 1px solid var(--border); border-radius: 5px; font: 12px/20px var(--mono); background: var(--surface); }
+.cell.t { background: var(--f-acc-bg); border-color: var(--f-acc); } .cell.h { background: var(--f-vio-bg); border-color: var(--f-vio); }
+.cell.w { background: var(--f-teal-bg); border-color: var(--f-teal); } .cell.on { background: var(--hl-soft); border-color: var(--hl); font-weight: 700; }
+.cell.off { opacity: .45; } .cell.bad { background: var(--l3-soft); border-color: var(--bad); color: var(--bad); }
+.cell.ok { background: var(--l1-soft); border-color: var(--ok); color: var(--ok); } .cell.gap { border-style: dashed; }
+
+/* ---------- hub cards / progress ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.card { display: block; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px 14px; color: var(--text); box-shadow: var(--shadow); }
+.card:hover { border-color: var(--accent); text-decoration: none; }
+.card .cid { font: 700 12.5px var(--mono); color: var(--accent); } .card .cmeta { color: var(--muted); font-size: 12px; }
+.card .ctitle { font-weight: 650; margin: 2px 0 6px; line-height: 1.45; }
+.card .clinks { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.card.done { border-color: var(--ok); } .card.done .cid::after { content: " ✓"; color: var(--ok); }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.progress > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.done-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+
+/* ---------- React-Flow-style diagrams ---------- */
+figure.flow { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.flow-head { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.flow-hint { margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.flow-body { overflow-x: auto; }
+.flow-body svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: var(--font); }
+figure.flow figcaption { padding: 7px 12px 9px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.f-bgdot { fill: var(--f-dot); }
+.f-node rect.f-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.3; filter: drop-shadow(0 1px 1.5px rgba(10,20,40,.10)); transition: stroke-width .15s, opacity .2s; }
+.f-node text.f-t { fill: var(--text); font-size: 13px; font-weight: 650; }
+.f-node text.f-s { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.f-node .f-handle { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.f-node.k-acc rect.f-box { fill: var(--f-acc-bg); stroke: var(--f-acc); } .f-node.k-warn rect.f-box { fill: var(--f-warn-bg); stroke: var(--f-warn); }
+.f-node.k-pass rect.f-box { fill: var(--f-pass-bg); stroke: var(--f-pass); } .f-node.k-vio rect.f-box { fill: var(--f-vio-bg); stroke: var(--f-vio); }
+.f-node.k-teal rect.f-box { fill: var(--f-teal-bg); stroke: var(--f-teal); } .f-node.k-todo rect.f-box { fill: var(--f-todo-bg); stroke: var(--f-todo); }
+.f-node.k-dark rect.f-box { fill: var(--text); stroke: var(--text); } .f-node.k-dark text { fill: var(--bg) !important; }
+.f-node.k-ghost rect.f-box { fill: none; stroke-dasharray: 4 3; }
+.f-grp rect { fill: none; stroke: var(--border); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.f-grp text { fill: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.f-grp.k-acc rect { fill: var(--f-acc-bg); fill-opacity: .35; stroke: var(--f-acc); } .f-grp.k-warn rect { fill: var(--f-warn-bg); fill-opacity: .45; stroke: var(--f-warn); }
+.f-grp.k-pass rect { fill: var(--f-pass-bg); fill-opacity: .45; stroke: var(--f-pass); } .f-grp.k-vio rect { fill: var(--f-vio-bg); fill-opacity: .45; stroke: var(--f-vio); }
+.f-grp.k-teal rect { fill: var(--f-teal-bg); fill-opacity: .45; stroke: var(--f-teal); } .f-grp.k-todo rect { fill: var(--f-todo-bg); fill-opacity: .45; stroke: var(--f-todo); }
+.f-e { fill: none; stroke: var(--muted); stroke-width: 1.6; transition: opacity .2s; }
+.f-e.k-acc { stroke: var(--f-acc); } .f-e.k-warn { stroke: var(--f-warn); } .f-e.k-pass { stroke: var(--f-pass); }
+.f-e.k-vio { stroke: var(--f-vio); } .f-e.k-teal { stroke: var(--f-teal); } .f-e.k-todo { stroke: var(--f-todo); }
+.f-ah { fill: var(--muted); transition: opacity .2s; } .f-ah.k-acc { fill: var(--f-acc); } .f-ah.k-warn { fill: var(--f-warn); } .f-ah.k-pass { fill: var(--f-pass); }
+.f-ah.k-vio { fill: var(--f-vio); } .f-ah.k-teal { fill: var(--f-teal); } .f-ah.k-todo { fill: var(--f-todo); }
+.f-e.dash { stroke-dasharray: 5 4; }
+.f-e.anim, .st-diagram svg.f-step .f-e.hl { stroke-dasharray: 6 4; animation: fdash .9s linear infinite; }
+@keyframes fdash { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .f-e.anim, .st-diagram svg.f-step .f-e.hl { animation: none; } }
+.f-el rect { fill: var(--surface); stroke: var(--border); } .f-el text { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.f-on .f-e:not(.hl), svg.f-on .f-el:not(.hl), svg.f-on .f-ah:not(.hl), svg.f-step .f-e:not(.hl), svg.f-step .f-ah:not(.hl), svg.f-step .f-el:not(.hl) { opacity: .15; }
+svg.f-on .f-node:not(.hl), svg.f-step .f-node:not(.hl) { opacity: .35; }
+svg .f-node.hl rect.f-box { stroke-width: 2.6; }
+svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
+
+/* ---------- responsive / print ---------- */
+@media (max-width: 1180px) { .layout.has-right { grid-template-columns: var(--left) minmax(0, 1fr); } .outline { display: none; } }
+@media (max-width: 900px) {
+  .layout, .layout.has-right { display: block; } .sidebar, .outline { display: none; }
+  main { padding: 16px 16px 80px; } .cover h1 { font-size: 26px; } h2 { font-size: 22px; }
+}
+@media print {
+  .sidebar, .outline, .theme-btn, .flow-hint, .st-ctrl, .st-dots, .pager, .code-head .btn, .done-row, .progress, #prog-text { display: none !important; }
+  .layout, .layout.has-right { display: block; } main { max-width: none; padding: 0; }
+  body { font-size: 12.5px; background: #fff; }
+  h2 { break-before: page; margin-top: 0; } h3, h4 { break-after: avoid; }
+  .page-break { break-before: page; }
+  figure.flow, .callout, table, .stepper .step, details.answer { break-inside: avoid; }
+  .codebox pre { max-height: none !important; overflow: visible !important; white-space: pre-wrap; word-break: break-all; }
+  .stepper.js .step { display: block !important; border-top: 1px dashed var(--border); }
+  a.src::after { content: ""; }
+  .f-e.anim { animation: none; }
+}
+
+</style>
+</head>
+<body data-store="cute-tiled-gemm-drills" data-copied="已复制">
+<div class="layout has-right">
+<nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
+<div class="nav-group">领域知识</div>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
+<a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
+<a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
+<a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
+<a class="nav-l3" href="../knowledge/real_code.html">真实代码导读：从 sgemm_sm80 到 SM90 warp-specialized GEMM</a>
+<a class="nav-l3" href="../knowledge/references.html">参考资料与边界说明</a>
+<div class="nav-group">Track A · 从零设计：五个空间映射问题</div>
+<a class="nav-l3" data-id="A1" href="../hints/a1_cta_tiling.html"><span class="nid">A1</span>CTA 切分：C tile、K 循环、local_tile 视图与边界谓词</a>
+<a class="nav-l3" data-id="A2" href="../hints/a2_copy_tv.html"><span class="nid">A2</span>线程怎样搬数据：从 ThrLayout / ValLayout 推出 Copy TV 映射，数 sector 与向量宽度</a>
+<a class="nav-l3" data-id="A3" href="../hints/a3_smem_swizzle.html"><span class="nid">A3</span>Shared memory 怎样摆：行主序、Swizzle&lt;2,2,2&gt; 与 bank conflict 的实测</a>
+<a class="nav-l3" data-id="A4" href="../hints/a4_mma_fragments.html"><span class="nid">A4</span>MMA fragment：从 PTX 的 groupID 规则推出 m16n8k16 的 TV_A / TV_B / TV_C，再扩展到 2×2 warp 并在寄存器里累加</a>
+<a class="nav-l3" data-id="A5" href="../hints/a5_assemble_gemm.html"><span class="nid">A5</span>把五个映射拼成完整的 Tiled GEMM：逐 CTA、逐 K 片模拟，统计 sector、wavefront 与 mma，并追踪 C[5][7]</a>
+<div class="nav-group">Track B · 用 Layout Algebra 重新表达</div>
+<a class="nav-l3" data-id="B1" href="../hints/b1_algebra_rewrite.html"><span class="nid">B1</span>用 Layout Algebra 重写 Track A：local_tile = zipped_divide + 切片，Copy TV = right_inverse(raked_product)，SMEM = Swizzle ∘ Layout</a>
+<a class="nav-l3" data-id="B2" href="../hints/b2_vector_width.html"><span class="nid">B2</span>一次能搬多宽：max_common_vector 推出向量宽度，swizzle 把它压到 2^M，padding 和对齐让它失效，再选 copy atom</a>
+<div class="nav-group">Track C · CuTe 编译期在做什么</div>
+<a class="nav-l3" data-id="C1" href="../hints/c1_static_folding.html"><span class="nid">C1</span>编译期化简：把 copy 地址写成表达式，做常量折叠、强度削减、coalesce 与循环外提，再和真实编译器的汇编对照</a>
+<a class="nav-l3" data-id="C2" href="../hints/c2_compile_checks.html"><span class="nid">C2</span>编译期合法性检查：复刻 CuTe 的 static_assert，并给一个 GEMM 配置做完整体检</a>
+<div class="nav-group">Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL</div>
+<a class="nav-l3" data-id="D1" href="../hints/d1_tma_box.html"><span class="nid">D1</span>TMA box：描述符合法性、expect_tx、越界填零与 swizzle 后的 SMEM 位置</a>
+<a class="nav-l3" data-id="D2" href="../hints/d2_mbarrier_pipeline.html"><span class="nid">D2</span>mbarrier 多级流水线：phase 奇偶、PipelineState、producer / consumer 协议与三种同步 bug</a>
+<a class="nav-l3" data-id="D3" href="../hints/d3_warp_specialization.html"><span class="nid">D3</span>Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</a>
+<a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
+<div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
+<a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3 cur" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
+<main>
+<header class="cover"><div class="kicker">F5 · Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090） · 90 分钟 · 难</div><h1>F5 · 在 5090 上扫配置：tile、stage、warp 排列、split-K，和 cuBLAS 对比</h1><p class="lede">最后一题把“配置决策”从纸面搬到 GPU 上：同一个模板化的流水线 kernel 实例化成 5 种 tile /stage / warp 配置，再加 split-K（grid 的第三维切 K，FP32 atomicAdd 归约），在三个形状上逐个对拍、计时，并跑 cuBLAS 当基准。上机之前，先用主机部分的代价模型给这些配置排好序；上机之后，用秩相关系数看模型错在哪里。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/f5_config_sweep_splitk.py"><code>mine/f5_config_sweep_splitk.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_f5_config_sweep_splitk.py"><code>tests/test_f5_config_sweep_splitk.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/f5_config_sweep_splitk.py"><code>solutions/f5_config_sweep_splitk.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="F5"> 我已完成这道题</label></header>
+<h2 id="f5-1">题面速览</h2>
+<ul>
+<li>背景知识：<a href="../knowledge/config.html">配置决策</a>（9 步流程，尤其第 4 步 split-K 和第 8 步“估时间、留候选、实测”）；<a href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量</a>；上机准备见 <a href="../hints/f1_simt_cute_gemm.html">F1</a>。</li>
+<li>给出的部分：<code>gpu/pipelined_mainloop.cuh</code> （就是 F3 的主循环，模板化了）、<code>gpu/tiled_gemm_config.hpp</code>（<code>Config&lt;BM,BN,BK,Stages,WarpM,WarpN&gt;</code> ）、扫描用的 <code>run&lt;Cfg&gt;()</code> 和 <code>main</code> 。</li>
+<li>你要写：</li>
+</ul>
+<ol>
+<li><code>mine/f5_config_sweep_splitk.cu</code> 的三个 <code>DRILL_TODO</code> ：① split-K 的子问题（指针偏移 + 更薄的 K）；②归约（S = 1 直接写，S &gt; 1 atomicAdd）；③ cuBLAS 基准（行主序 → 列主序的参数换算）。</li>
+<li><code>mine/f5_config_sweep_splitk.py</code> ：<code>smem_bytes</code> 、<code>legal</code> 、<code>predict_us</code> 、<code>rank</code> 、<code>best</code> 、<code>compare</code> 。</li>
+</ol>
+<ul>
+<li>关键规则：</li>
+</ul>
+<ol>
+<li>第 z 个 split 处理 K 的 <code>[z·Kc, (z+1)·Kc)</code> ：A、B 的指针各往后挪 <code>z·Kc</code> 个元素，形状 (M, Kc)、(N, Kc)，leading dimension 仍然是 K。</li>
+<li>S &gt; 1 时 C 先清零，每个 CTA 对自己的 64 个累加器做 <code>atomicAdd</code> ——结果不确定（浮点加法顺序不同），但在 1e-3 的容差内。</li>
+<li>模型（docstring 有完整公式）：最忙的 SM 顺序跑 ceil(CTA / 170) 个 CTA；每个 k-tile = 计算 + 150 clk 固定开销；每个 CTA 1500 clk 填充；显存下限；split-K 额外的 (1 + S)·M·N·4 字节。</li>
+</ol>
+<p>测试检查：合法性（整除、SMEM）· 预测公式的两个手算值 · 大问题的最优是不切 K、tile 少 K 长时最优比 128×128 不切快 40% 以上 · <code>compare</code> 的秩相关 · <code>.cu</code> 类型检查 · GPU 上三个形状所有配置对拍通过，并打印“预测 vs 实测”。</p>
+<h2 id="f5-2">直觉与类比</h2>
+
+<div class="callout analogy"><div class="callout-title">类比 · 先排班，再上工，最后复盘</div><p>厂长拿到一批订单，先在纸上排班：哪种小组规模、几张工作台、要不要把一单拆给几个小组分头做（split-K）。排完上工，记下每种排法真正花了多久，再和隔壁大厂（cuBLAS）比。最后复盘：纸面排名和实际排名差在哪——是没算中转仓（L2）的拥堵，还是低估了小组之间交接（atomic 归约）的成本。</p>
+</div>
+<h2 id="f5-3">图解：split-K 在 kernel 里只改两处</h2>
+
+<figure class="flow"><div class="flow-head">split-K 在 kernel 里只改两处<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;split-K 在 kernel 里只改两处&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;gr&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;grid (M/BM, N/BN, S)&quot;, &quot;s&quot;: &quot;z = blockIdx.z&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;sub&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;子问题&quot;, &quot;s&quot;: &quot;A + z·Kc，形状 Kc&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ml&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;流水线主循环&quot;, &quot;s&quot;: &quot;和 F3 完全一样&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s1&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;S == 1&quot;, &quot;s&quot;: &quot;copy 写回&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s2&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;S &gt; 1&quot;, &quot;s&quot;: &quot;atomicAdd&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;gr&quot;, &quot;b&quot;: &quot;sub&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;sub&quot;, &quot;b&quot;: &quot;ml&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ml&quot;, &quot;b&quot;: &quot;s1&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ml&quot;, &quot;b&quot;: &quot;s2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 215.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 175.0}}"></div><figcaption>主循环完全不用改：对它来说，第 z 段 K 就是一个 K = Kc 的普通问题，只是 A、B 的行之间仍然隔着原来的 K。</figcaption></figure>
+<h2 id="f5-4">逐步演示：1024 × 1024 × 16384 上的四种做法</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 1024 × 1024 × 16384 上的四种做法</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;a&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;128×128 S=1&quot;, &quot;s&quot;: &quot;64 CTA&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;b&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;128×128 S=2&quot;, &quot;s&quot;: &quot;128 CTA&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;64×64 S=4&quot;, &quot;s&quot;: &quot;1024 CTA&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;实测&quot;, &quot;s&quot;: &quot;排名对吗？&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;b&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;d&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="a"><div class="step-title">1. 128×128，不切 K：只用 64 个 SM</div><p>64 个 CTA，每个走 256 个 k-tile。模型：256 × (4096 + 150) + 1500 ≈ 109 万 clk ≈ 452 µs。170 个 SM 里 106 个闲着。</p>
+</div><div class="step" data-hl="b"><div class="step-title">2. 128×128，S = 2</div><p>128 个 CTA，每个 128 个 k-tile：主循环减半到约 226 µs，再加约 7 µs 的清零和原子加。这是模型的第一名。</p>
+</div><div class="step" data-hl="c"><div class="step-title">3. 64×64，S = 4</div><p>1024 个 CTA，分 7 批（ceil(1024 / 170)）；每个 64 个 k-tile × (1024 + 150) clk。模型几乎和 S = 2 并列——但它没有算 L2 流量：64×64 的 tile 让同一块 A、B 被读的次数翻倍。</p>
+</div><div class="step" data-hl="d"><div class="step-title">4. 上机看排名</div><p>测试会打印每个配置的“预测 µs / 实测 µs”和 Spearman 秩相关。相关性高，说明模型抓住了 SM 利用率这个主要矛盾；某几个配置排错了，通常是模型没建 L2 带宽、epilogue 或寄存器 spill（128×256 每线程 128 个累加器）。</p>
+</div></div></div>
+<h2 id="f5-5">从小例子开始：先在草稿纸上手算</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>算式</th>
+<th>结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4096³、128×128×64 S=1 的预测</td>
+<td>1024 CTA → 最忙 SM 7 个；7 × (64 × 4246 + 1500)/ 2410</td>
+<td>≈ 793.7 µs</td>
+</tr>
+<tr>
+<td>1024²×16384、S=2 的预测</td>
+<td>1 × (128 × 4246 + 1500) / 2410 + 3 × 4 MB / 1.792 GB/ms</td>
+<td>≈ 226.1 + 7.0 µs</td>
+</tr>
+<tr>
+<td>S = 5 合不合法（K = 16384）</td>
+<td>16384 / 5 不是 64 的倍数</td>
+<td>不合法（&quot;divisibility&quot;）</td>
+</tr>
+<tr>
+<td>128×256×64、2 级的 SMEM</td>
+<td>2 × 384 × 64 × 2</td>
+<td>96 KB，合法</td>
+</tr>
+<tr>
+<td>cuBLAS 的参数</td>
+<td>Cᵀ(N×M) = B·Aᵀ：<code>gemm(T, N, m=N, n=M, k=K, B, ldb=K, A, lda=K, C, ldc=N)</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="f5-6">上机验证</h2>
+<pre><code>./check.sh f5 -s                                            # 三个形状，打印所有配置和 cuBLAS
+python3 tools/cu_drill.py run mine/f5_config_sweep_splitk.cu 8192 8192 8192   # 只看最后一行
+</code></pre>
+<p>记录三件事：①每个形状上最快的配置是不是模型的前三名；②最好的配置达到 cuBLAS 的多少（cuBLAS 在 5090 上会用 sm_120 专门调过的 kernel，差距主要来自 epilogue、tile 调度和更深的软件流水）；③split-K 在哪个形状上赢、在哪个形状上输，和 <a href="../knowledge/config.html">配置决策</a> 4.7 节的“三个禁区”对不对得上。</p>
+<h2 id="f5-7">提示</h2>
+
+<details class="hint l1"><summary><span class="lvl">L1</span>先把 Python 模型写对<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><p><code>predict_us</code> 的每一项都在 docstring 里给了公式，测试里有两个手算值（4096³ S=1、1024²×16384 S=2）。先让这两个数对上，再看 <code>rank</code> 的排序是否符合直觉。</p>
+</div></details>
+
+<details class="hint l2"><summary><span class="lvl">L2</span>思路拆解<span class="spoiler-note">拆解与常见坑（中度剧透）</span></summary><div class="body"><p>① <code>int kc = K / splits; int z = blockIdx.z;</code> ，<code>make_tensor(make_gmem_ptr(A + size_t(z) * kc), make_shape(M, kc), make_stride(K, Int&lt;1&gt;{}))</code> ，B 同理。② <code>if (splits == 1) copy(tCrC, tCgC); else for</code> <code>(i…) atomicAdd(&amp;tCgC(i), tCrC(i));</code> —— <code>tCgC(i)</code> 是全局内存里那个 float 的引用，取地址就是 <code>float*</code> 。③<code>cublasGemmEx(h, CUBLAS_OP_T, CUBLAS_OP_N, N, M, K, &amp;alpha, B, CUDA_R_16BF, K, A, CUDA_R_16BF, K, &amp;beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT)</code> 。</p>
+</div></details>
+
+<details class="hint l3"><summary><span class="lvl">L3</span>关键问题的答案<span class="spoiler-note">几乎是答案（重度剧透）</span></summary><div class="body"><p>为什么 leading dimension 不能也换成 Kc？</p>
+<p>A 在内存里仍然是 M×K 的一整块：第 m 行从 <code>A + m·K</code> 开始。第 z 段只是每一行里的 <code>[z·Kc, (z+1)·Kc)</code> 这一截。指针挪 <code>z·Kc</code> 让每行的起点对上，stride 仍然是 K 才能跳到下一行。如果写成 Kc，第 1 行就会读到第 0 行后半截的数据。</p>
+</div></details>
+<h2 id="f5-8">参考解</h2>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/f5_config_sweep_splitk.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/f5_config_sweep_splitk.py</span><span class="muted small">121 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;F5 · 在 RTX 5090 上扫配置：tile、stage、warp 排列、split-K，并和 cuBLAS 对比 — reference solution.
+
+GPU 部分在 `f5_config_sweep_splitk.cu`：同一个模板化的流水线 kernel（gpu/pipelined_mainloop.cuh）实例化成几种配置，
+每种配置跑正确性和计时，再跑 cuBLAS 当基准。本文件是主机部分：**在上机之前**先用代价模型给这些配置排序，
+上机之后再和实测比，看模型错在哪里（知识页“配置决策”第 8 步）。
+
+配置（和 .cu 里的 run&lt;...&gt;(...) 一一对应）
+    CONFIGS = [Cfg(name, BM, BN, BK, stages, warp_m, warp_n, splits), ...]    given
+
+legal(cfg, M, N, K) -&gt; (bool, reason)
+- M % BM == 0、N % BN == 0、K % (splits·BK) == 0，否则 (False, &quot;divisibility&quot;)
+- smem_bytes(cfg) = stages·(BM + BN)·BK·2 ≤ 99·1024，否则 (False, &quot;smem&quot;)
+- 合法时返回 (True, &quot;&quot;)
+
+predict_us(cfg, M, N, K) -&gt; float：一个故意简单的模型（常数见下）
+- CTA 数 = (M/BM)·(N/BN)·splits；最忙的 SM 顺序跑 ceil(CTA 数 / 170) 个 CTA
+- 每个 CTA 的 k-tile 数 kt = K / (splits·BK)；每个 k-tile = 2·BM·BN·BK / 512 + 150 clk（计算 + 固定开销）
+- 主循环 = ceil(CTA/170) · (kt · 每 k-tile + 1500 clk 填充)
+- 显存下限 = ((M + N)·K·2 + M·N·4) 字节 / 1792 GB/s
+- split-K 额外开销（splits &gt; 1）：C 清零 + 每个 split 一遍 FP32 原子加 ≈ (1 + splits)·M·N·4 字节 / 1792 GB/s
+- 结果 = max(主循环, 显存下限) + split-K 开销；时钟按 2.41 GHz 换算成 µs
+rank(M, N, K) -&gt; [(name, splits, predicted_us), ...]：只含合法配置，按预测时间从小到大
+best(M, N, K) -&gt; Cfg
+
+compare(measured) -&gt; dict：measured 是 .cu 打印的 JSON 列表（含 &quot;kernel&quot;、&quot;splits&quot;、&quot;ms&quot;）
+- 返回 {&quot;pairs&quot;: [(name, splits, predicted_us, measured_us), ...], &quot;spearman&quot;: 秩相关系数}
+- 只统计两边都有的配置；少于 2 个时 spearman 为 None
+
+常数：SMS = 170，CLK_GHZ = 2.41，TC_FLOP_PER_CLK = 512，OVERHEAD_CLK = 150，FILL_CLK = 1500，DRAM_GBPS = 1792
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+SMS, CLK_GHZ, TC_FLOP_PER_CLK = 170, 2.41, 512
+OVERHEAD_CLK, FILL_CLK, DRAM_GBPS = 150, 1500, 1792
+SMEM_LIMIT = 99 * 1024
+
+
+@dataclass(frozen=True)
+class Cfg:
+    name: str
+    BM: int
+    BN: int
+    BK: int
+    stages: int
+    warp_m: int
+    warp_n: int
+    splits: int = 1
+
+
+CONFIGS = [
+    Cfg(&quot;128x128x64_s3_w2x4&quot;, 128, 128, 64, 3, 2, 4),
+    Cfg(&quot;128x128x64_s2_w2x4&quot;, 128, 128, 64, 2, 2, 4),
+    Cfg(&quot;128x64x64_s4_w2x2&quot;, 128, 64, 64, 4, 2, 2),
+    Cfg(&quot;64x64x64_s4_w2x2&quot;, 64, 64, 64, 4, 2, 2),
+    Cfg(&quot;128x256x64_s2_w2x4&quot;, 128, 256, 64, 2, 2, 4),
+    *[Cfg(&quot;128x128x64_s3_w2x4_splitk&quot;, 128, 128, 64, 3, 2, 4, s) for s in (2, 4, 5, 8)],
+    *[Cfg(&quot;64x64x64_s4_w2x2_splitk&quot;, 64, 64, 64, 4, 2, 2, s) for s in (2, 4)],
+]
+
+
+def smem_bytes(cfg: Cfg) -&gt; int:
+    return cfg.stages * (cfg.BM + cfg.BN) * cfg.BK * 2
+
+
+def legal(cfg: Cfg, M: int, N: int, K: int) -&gt; tuple:
+    if M % cfg.BM or N % cfg.BN or K % (cfg.splits * cfg.BK):
+        return False, &quot;divisibility&quot;
+    if smem_bytes(cfg) &gt; SMEM_LIMIT:
+        return False, &quot;smem&quot;
+    return True, &quot;&quot;
+
+
+def predict_us(cfg: Cfg, M: int, N: int, K: int) -&gt; float:
+    ok, why = legal(cfg, M, N, K)
+    if not ok:
+        raise ValueError(f&quot;{cfg.name} (splits={cfg.splits}) is illegal for {M}x{N}x{K}: {why}&quot;)
+    ctas = (M // cfg.BM) * (N // cfg.BN) * cfg.splits
+    kt = K // (cfg.splits * cfg.BK)
+    per_k = 2 * cfg.BM * cfg.BN * cfg.BK / TC_FLOP_PER_CLK + OVERHEAD_CLK
+    main_us = math.ceil(ctas / SMS) * (kt * per_k + FILL_CLK) / (CLK_GHZ * 1e3)
+    dram_us = ((M + N) * K * 2 + M * N * 4) / (DRAM_GBPS * 1e3)
+    split_us = (1 + cfg.splits) * M * N * 4 / (DRAM_GBPS * 1e3) if cfg.splits &gt; 1 else 0.0
+    return max(main_us, dram_us) + split_us
+
+
+def rank(M: int, N: int, K: int) -&gt; list:
+    out = [(c.name, c.splits, predict_us(c, M, N, K)) for c in CONFIGS if legal(c, M, N, K)[0]]
+    return sorted(out, key=lambda x: x[2])
+
+
+def best(M: int, N: int, K: int) -&gt; Cfg:
+    name, splits, _ = rank(M, N, K)[0]
+    return next(c for c in CONFIGS if c.name == name and c.splits == splits)
+
+
+def _ranks(xs):
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    r = [0.0] * len(xs)
+    for pos, i in enumerate(order):
+        r[i] = float(pos)
+    return r
+
+
+def compare(measured: list) -&gt; dict:
+    pairs = []
+    for m in measured:
+        if m.get(&quot;skipped&quot;) or m.get(&quot;baseline&quot;) or &quot;ms&quot; not in m:
+            continue
+        cfg = next((c for c in CONFIGS if c.name == m[&quot;kernel&quot;] and c.splits == m.get(&quot;splits&quot;, 1)), None)
+        if cfg is None or not legal(cfg, m[&quot;M&quot;], m[&quot;N&quot;], m[&quot;K&quot;])[0]:
+            continue
+        pairs.append((cfg.name, cfg.splits, predict_us(cfg, m[&quot;M&quot;], m[&quot;N&quot;], m[&quot;K&quot;]), m[&quot;ms&quot;] * 1e3))
+    if len(pairs) &lt; 2:
+        return {&quot;pairs&quot;: pairs, &quot;spearman&quot;: None}
+    rp, rm = _ranks([p[2] for p in pairs]), _ranks([p[3] for p in pairs])
+    n = len(pairs)
+    d2 = sum((a - b) ** 2 for a, b in zip(rp, rm))
+    return {&quot;pairs&quot;: pairs, &quot;spearman&quot;: 1 - 6 * d2 / (n * (n * n - 1))}</code></pre></div></div></details>
+
+<details class="solution"><summary><span class="lvl">✓</span>solutions/f5_config_sweep_splitk.cu<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/f5_config_sweep_splitk.cu</span><span class="muted small">164 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-cpp">// F5 · 在 RTX 5090 上扫配置：tile、stage、warp 排列、split-K，并和 cuBLAS 对比 — reference solution.
+//
+// 主循环来自 gpu/pipelined_mainloop.cuh（就是 F3 的那一段，模板化了）。这一题要写的是：
+//   1. split-K：grid 的第三维 z 负责 K 的第 z 段。做法是把 A、B 的指针往后挪 z·Kc 个元素、K 换成 Kc，
+//      leading dimension 仍然是原来的 K——对 kernel 来说就是一个更“薄”的子问题。
+//   2. split-K 的归约：S == 1 时直接写；S &gt; 1 时每个 CTA 对 C 做 FP32 atomicAdd（C 先清零）。
+//      这是知识页“配置决策”4.2 里的 atomic 方式：最快，但加法顺序不确定，结果可能差最后几位。
+//   3. 扫描：对每个配置检查合法性（整除、SMEM ≤ 99 KB），跑正确性和计时，每个配置打印一行 JSON；最后跑 cuBLAS 作为基准。
+//
+// 运行：python3 tools/cu_drill.py run solutions/f5_config_sweep_splitk.cu 1024 1024 16384
+//       （tools/cu_drill.py 会给 F5 自动加 -lcublas；没有 cuBLAS 头文件时跳过基准）
+#include &lt;cute/tensor.hpp&gt;
+
+#include &quot;common.cuh&quot;
+#include &quot;pipelined_mainloop.cuh&quot;
+#include &quot;tiled_gemm_config.hpp&quot;
+
+#if __has_include(&lt;cublas_v2.h&gt;)
+#include &lt;cublas_v2.h&gt;
+#define DRILL_HAS_CUBLAS 1
+#else
+#define DRILL_HAS_CUBLAS 0
+#endif
+
+using namespace cute;
+
+namespace f5 {
+
+template &lt;class Cfg&gt;
+__global__ __launch_bounds__(Cfg::Threads) void gemm_kernel(int M, int N, int K, int splits,
+                                                            typename Cfg::TA const* A, typename Cfg::TB const* B,
+                                                            float* C) {
+  // [TODO ①] split-K：第 z 段 K 的 mA、mB（指针挪 z·Kc，形状用 Kc，leading dimension 仍是 K）
+  // ① split-K：第 z 段 K 是 [z·Kc, (z+1)·Kc)，指针挪过去，leading dimension 还是 K
+  int kc = K / splits;
+  int z = blockIdx.z;
+  Tensor mA = make_tensor(make_gmem_ptr(A + size_t(z) * kc), make_shape(M, kc), make_stride(K, Int&lt;1&gt;{}));
+  Tensor mB = make_tensor(make_gmem_ptr(B + size_t(z) * kc), make_shape(N, kc), make_stride(K, Int&lt;1&gt;{}));
+  // [/TODO]
+  Tensor mC = make_tensor(make_gmem_ptr(C), make_shape(M, N), make_stride(N, Int&lt;1&gt;{}));
+
+  auto cta_tiler = make_shape(Int&lt;Cfg::BM&gt;{}, Int&lt;Cfg::BN&gt;{}, Int&lt;Cfg::BK&gt;{});
+  auto cta_coord = make_coord(blockIdx.x, blockIdx.y, _);
+  Tensor gA = local_tile(mA, cta_tiler, cta_coord, Step&lt;_1, X, _1&gt;{});
+  Tensor gB = local_tile(mB, cta_tiler, cta_coord, Step&lt;X, _1, _1&gt;{});
+  Tensor gC = local_tile(mC, cta_tiler, cta_coord, Step&lt;_1, _1, X&gt;{});
+
+  extern __shared__ __align__(128) unsigned char smem_raw[];
+  typename Cfg::TiledMma mma;
+  auto thr_mma = mma.get_slice(threadIdx.x);
+  Tensor tCgC = thr_mma.partition_C(gC);
+  Tensor tCrC = thr_mma.partition_fragment_C(gC);
+  clear(tCrC);
+
+  cfg::pipelined_mainloop&lt;Cfg&gt;(gA, gB, smem_raw, mma, tCrC);
+
+  // [TODO ②] 归约：splits == 1 直接写；否则对每个累加器 atomicAdd 到 C
+  // ② 归约
+  if (splits == 1) {
+    copy(tCrC, tCgC);
+  } else {
+    CUTE_UNROLL
+    for (int i = 0; i &lt; size(tCrC); ++i) atomicAdd(&amp;tCgC(i), tCrC(i));
+  }
+  // [/TODO]
+}
+
+struct Problem {
+  int M, N, K, iters;
+  __nv_bfloat16 const* A;
+  __nv_bfloat16 const* B;
+  float* C;
+  std::vector&lt;float&gt; const* ref;
+};
+
+// ③ 跑一个配置：不合法就打印原因；合法就校验 + 计时
+template &lt;class Cfg&gt;
+void run(Problem const&amp; p, int splits, char const* name) {
+  bool legal = p.M % Cfg::BM == 0 &amp;&amp; p.N % Cfg::BN == 0 &amp;&amp; p.K % (splits * Cfg::BK) == 0 &amp;&amp;
+               Cfg::SmemBytes &lt;= 99 * 1024;
+  if (!legal) {
+    std::printf(&quot;{\&quot;ok\&quot;: true, \&quot;skipped\&quot;: true, \&quot;kernel\&quot;: \&quot;%s\&quot;, \&quot;splits\&quot;: %d, \&quot;smem_bytes\&quot;: %d}\n&quot;, name,
+                splits, Cfg::SmemBytes);
+    return;
+  }
+  CUDA_CHECK(cudaFuncSetAttribute(gemm_kernel&lt;Cfg&gt;, cudaFuncAttributeMaxDynamicSharedMemorySize, Cfg::SmemBytes));
+  dim3 grid(p.M / Cfg::BM, p.N / Cfg::BN, splits);
+  auto go = [&amp;] {
+    if (splits &gt; 1) CUDA_CHECK(cudaMemsetAsync(p.C, 0, size_t(p.M) * p.N * sizeof(float)));
+    gemm_kernel&lt;Cfg&gt;&lt;&lt;&lt;grid, Cfg::Threads, Cfg::SmemBytes&gt;&gt;&gt;(
+        p.M, p.N, p.K, splits, reinterpret_cast&lt;typename Cfg::TA const*&gt;(p.A),
+        reinterpret_cast&lt;typename Cfg::TB const*&gt;(p.B), p.C);
+  };
+  go();
+  CUDA_CHECK(cudaDeviceSynchronize());
+  std::vector&lt;float&gt; got(size_t(p.M) * p.N);
+  CUDA_CHECK(cudaMemcpy(got.data(), p.C, got.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  double err = drill::max_rel_err(got, *p.ref);
+  float ms = drill::time_ms(go, p.iters);
+  char extra[192];
+  std::snprintf(extra, sizeof extra,
+                &quot;, \&quot;BM\&quot;: %d, \&quot;BN\&quot;: %d, \&quot;BK\&quot;: %d, \&quot;stages\&quot;: %d, \&quot;warps\&quot;: \&quot;%dx%d\&quot;, \&quot;splits\&quot;: %d, &quot;
+                &quot;\&quot;ctas\&quot;: %d, \&quot;smem_bytes\&quot;: %d&quot;,
+                Cfg::BM, Cfg::BN, Cfg::BK, Cfg::Stages, Cfg::WarpM, Cfg::WarpN, splits,
+                int(grid.x * grid.y * grid.z), Cfg::SmemBytes);
+  drill::report(name, drill::Args{p.M, p.N, p.K, p.iters}, err, ms, extra);
+}
+
+#if DRILL_HAS_CUBLAS
+// C(M×N 行主序) = A(M×K 行主序) · B(N×K 行主序)ᵀ。换成 cuBLAS 的列主序：Cᵀ(N×M) = B · Aᵀ，
+// 也就是 gemm(op(B)=T, op(A)=N, m=N, n=M, k=K)，三个 leading dimension 分别是 K、K、N。
+// [TODO ③] cuBLAS 基准：把行主序的 C = A·Bᵀ 换成列主序的 Cᵀ = B·Aᵀ，写出 cublasGemmEx 的参数（m、n、k、op、ld）
+void run_cublas(Problem const&amp; p) {
+  cublasHandle_t h;
+  cublasCreate(&amp;h);
+  float alpha = 1.f, beta = 0.f;
+  auto go = [&amp;] {
+    cublasGemmEx(h, CUBLAS_OP_T, CUBLAS_OP_N, p.N, p.M, p.K, &amp;alpha, p.B, CUDA_R_16BF, p.K, p.A, CUDA_R_16BF, p.K,
+                 &amp;beta, p.C, CUDA_R_32F, p.N, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+  };
+  go();
+  CUDA_CHECK(cudaDeviceSynchronize());
+  std::vector&lt;float&gt; got(size_t(p.M) * p.N);
+  CUDA_CHECK(cudaMemcpy(got.data(), p.C, got.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  double err = drill::max_rel_err(got, *p.ref);
+  float ms = drill::time_ms(go, p.iters);
+  drill::report(&quot;cublas_bf16_fp32&quot;, drill::Args{p.M, p.N, p.K, p.iters}, err, ms, &quot;, \&quot;baseline\&quot;: true&quot;);
+  cublasDestroy(h);
+}
+// [/TODO]
+#endif
+
+}  // namespace f5
+
+using C128x128s3 = cfg::Config&lt;128, 128, 64, 3, 2, 4&gt;;
+using C128x128s2 = cfg::Config&lt;128, 128, 64, 2, 2, 4&gt;;
+using C128x64s4 = cfg::Config&lt;128, 64, 64, 4, 2, 2&gt;;
+using C64x64s4 = cfg::Config&lt;64, 64, 64, 4, 2, 2&gt;;
+using C128x256s2 = cfg::Config&lt;128, 256, 64, 2, 2, 4&gt;;
+
+int main(int argc, char** argv) {
+  auto a = drill::parse(argc, argv);
+  std::vector&lt;__nv_bfloat16&gt; hA(size_t(a.M) * a.K), hB(size_t(a.N) * a.K);
+  drill::fill_bf16(hA, 1);
+  drill::fill_bf16(hB, 2);
+  auto* dA = drill::to_device(hA);
+  auto* dB = drill::to_device(hB);
+  float* dC = nullptr;
+  CUDA_CHECK(cudaMalloc(&amp;dC, size_t(a.M) * a.N * sizeof(float)));
+  auto ref = drill::reference(a.M, a.N, a.K, dA, dB);
+  f5::Problem p{a.M, a.N, a.K, a.iters, dA, dB, dC, &amp;ref};
+
+  f5::run&lt;C128x128s3&gt;(p, 1, &quot;128x128x64_s3_w2x4&quot;);
+  f5::run&lt;C128x128s2&gt;(p, 1, &quot;128x128x64_s2_w2x4&quot;);
+  f5::run&lt;C128x64s4&gt;(p, 1, &quot;128x64x64_s4_w2x2&quot;);
+  f5::run&lt;C64x64s4&gt;(p, 1, &quot;64x64x64_s4_w2x2&quot;);
+  f5::run&lt;C128x256s2&gt;(p, 1, &quot;128x256x64_s2_w2x4&quot;);
+  for (int s : {2, 4, 5, 8}) f5::run&lt;C128x128s3&gt;(p, s, &quot;128x128x64_s3_w2x4_splitk&quot;);
+  for (int s : {2, 4}) f5::run&lt;C64x64s4&gt;(p, s, &quot;64x64x64_s4_w2x2_splitk&quot;);
+#if DRILL_HAS_CUBLAS
+  f5::run_cublas(p);
+#endif
+  return 0;
+}</code></pre></div></div></details>
+<h2 id="f5-9">面试官追问 &amp; 对照源码</h2>
+<ul>
+<li>把 atomicAdd 换成 parallel split-K（每个 split 写自己的 workspace，再起一个归约 kernel），哪个形状上更快、哪个更慢？结果是否变成确定性的？</li>
+<li>实现一个最简单的 Stream-K：开 170 个 persistent CTA，每个 CTA 领连续的 ceil(T·kt / 170) 个 k-tile 单元。和 split-K 比，最大的实现难点在哪（提示：一个 CTA 可能跨两个输出 tile 的边界）？参考 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_tile_scheduler_stream_k.hpp">sm90_tile_scheduler_stream_k.hpp</a> 。</li>
+<li>进阶：CuTe DSL（Python）。同样的 Ampere 风格 GEMM 有官方的 Python 写法 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/python/CuTeDSL/cute/ampere/kernel/dense_gemm/tensorop_gemm.py">tensorop_gemm.py</a> ，5090 专用的 TMA 版本是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/python/CuTeDSL/cute/blackwell_geforce/kernel/dense_gemm/dense_gemm.py">blackwell_geforce dense_gemm.py</a> 。在 5090 机器上 <code>pip install nvidia-cutlass-dsl</code> 后可以直接运行；对照本题，找出它们的 tile、stage、TiledCopy、TiledMMA 分别写在哪里。（这台 Mac 上装不了 CuTe DSL 的编译器库，所以这部分没有放进测试。）</li>
+</ul>
+
+<nav class="pager"><a href="f4_epilogue_residue.html">← 上一题 F4</a><span></span></nav>
+</main>
+<aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
+<a class="o2" href="#f5-1">题面速览</a>
+<a class="o2" href="#f5-2">直觉与类比</a>
+<a class="o2" href="#f5-3">图解：split-K 在 kernel 里只改两处</a>
+<a class="o2" href="#f5-4">逐步演示：1024 × 1024 × 16384 上的四种做法</a>
+<a class="o2" href="#f5-5">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#f5-6">上机验证</a>
+<a class="o2" href="#f5-7">提示</a>
+<a class="o2" href="#f5-8">参考解</a>
+<a class="o2" href="#f5-9">面试官追问 &amp; 对照源码</a></aside>
+</div>
+<button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+/* ai-infra-dev-skills · shared page behaviour. Pure DOM, no dependencies, works from file:// and in print. */
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var BODY = document.body || document.documentElement;
+  var KEY = (BODY.getAttribute && BODY.getAttribute("data-store")) || "aids";
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(KEY + ":" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(KEY + ":" + k, JSON.stringify(v)); } catch (e) {} }
+  };
+  var PRINT = /[?&]print\b/.test(location.search) || window.__PRINT__;
+  function each(sel, fn, root) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); }
+
+  // ------------------------------------------------------------------ theme
+  function applyTheme(t) { if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme"); }
+  applyTheme(PRINT ? "light" : store.get("theme", null));
+  function initTheme() {
+    var b = document.getElementById("theme-btn"); if (!b) return;
+    b.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme");
+      var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(dark ? "light" : "dark"); store.set("theme", dark ? "light" : "dark");
+    });
+  }
+
+  // ------------------------------------------------------------------ flow diagrams (React-Flow style, static SVG)
+  function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function txt(parent, x, y, s, cls, anchor) { var t = el("text", { x: x, y: y, "class": cls, "text-anchor": anchor || "middle" }, parent); t.textContent = s; return t; }
+  function renderFlow(host, spec) {
+    var cfg = spec.cfg || {}, CW = cfg.cw || 200, RH = cfg.rh || 88, NW = cfg.nw || 160, PAD = 26;
+    var N = {}, maxX = 0, maxY = 0;
+    spec.nodes.forEach(function (n) {
+      var w = NW * n.w, h = n.s ? 52 : 38, x = PAD + n.c * CW, y = PAD + 14 + n.r * RH;
+      N[n.id] = { n: n, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+      maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+    });
+    var groups = (spec.groups || []).map(function (g) {
+      var x0 = PAD + g.c0 * CW - 14, y0 = PAD + 14 + g.r0 * RH - 28, x1 = PAD + g.c1 * CW + NW + 14, y1 = PAD + 14 + g.r1 * RH + 52 + 14;
+      maxX = Math.max(maxX, x1); maxY = Math.max(maxY, y1); return { g: g, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+    var W = maxX + PAD, H = maxY + PAD;
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, role: "img", "aria-label": spec.title });
+    var uid = "f" + Math.random().toString(36).slice(2, 8);
+    var pat = el("pattern", { id: uid + "dot", width: 16, height: 16, patternUnits: "userSpaceOnUse" }, el("defs", {}, svg));
+    el("circle", { cx: 1, cy: 1, r: 1, "class": "f-bgdot" }, pat);
+    var bg = el("rect", { x: 0, y: 0, width: W, height: H, fill: "url(#" + uid + "dot)" }, svg);
+    groups.forEach(function (G) {
+      var gg = el("g", { "class": "f-grp" + (G.g.k ? " k-" + G.g.k : "") }, svg);
+      el("rect", { x: G.x0, y: G.y0, width: G.x1 - G.x0, height: G.y1 - G.y0, rx: 10 }, gg);
+      txt(gg, G.x0 + 10, G.y0 + 15, G.g.t, "", "start");
+    });
+    var edgeLayer = el("g", {}, svg), nodeLayer = el("g", {}, svg), topLayer = el("g", {}, svg);
+    function side(A, B) {
+      var dx = B.cx - A.cx, dy = B.cy - A.cy;
+      if (Math.abs(dx) >= Math.abs(dy) * 0.9) return dx >= 0 ? ["r", "l"] : ["l", "r"];
+      return dy >= 0 ? ["b", "t"] : ["t", "b"];
+    }
+    function port(P, s) { return s === "r" ? [P.x + P.w, P.cy] : s === "l" ? [P.x, P.cy] : s === "t" ? [P.cx, P.y] : [P.cx, P.y + P.h]; }
+    function dir(s) { return s === "r" ? [1, 0] : s === "l" ? [-1, 0] : s === "t" ? [0, -1] : [0, 1]; }
+    var nodeEdges = {};
+    spec.edges.forEach(function (e) {
+      var as = e.a.split(":"), bs = e.b.split(":"), A = N[as[0]], B = N[bs[0]];
+      var auto = side(A, B), sa = as[1] || auto[0], sb = bs[1] || auto[1];
+      var p0 = port(A, sa), p3 = port(B, sb), d0 = dir(sa), d3 = dir(sb);
+      var dist = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]), off = Math.max(36, Math.min(140, dist * 0.45));
+      if (sa === sb) off = Math.max(off, 60);
+      var p1 = [p0[0] + d0[0] * off, p0[1] + d0[1] * off], p2 = [p3[0] + d3[0] * (off + 6), p3[1] + d3[1] * (off + 6)];
+      var end = [p3[0] + d3[0] * 8, p3[1] + d3[1] * 8];
+      var k = e.k ? " k-" + e.k : "", eid = as[0] + ">" + bs[0];
+      var path = el("path", { d: "M" + p0 + " C" + p1 + " " + p2 + " " + end, "class": "f-e" + k + (e.anim ? " anim" : "") + (e.dash ? " dash" : ""), "data-edge": eid }, edgeLayer);
+      // arrowhead: tip on the target port, body outside the node, drawn above the nodes
+      var bx = p3[0] + d3[0] * 9, by = p3[1] + d3[1] * 9;
+      var ah = el("path", { d: "M" + p3 + " L" + (bx + d3[1] * 4.5) + "," + (by - d3[0] * 4.5) + " L" + (bx - d3[1] * 4.5) + "," + (by + d3[0] * 4.5) + " z", "class": "f-ah" + k, "data-edge": eid }, topLayer);
+      var items = [path, ah];
+      if (e.t) {
+        var t = 0.5, mx = Math.pow(1 - t, 3) * p0[0] + 3 * Math.pow(1 - t, 2) * t * p1[0] + 3 * (1 - t) * t * t * p2[0] + t * t * t * end[0];
+        var my = Math.pow(1 - t, 3) * p0[1] + 3 * Math.pow(1 - t, 2) * t * p1[1] + 3 * (1 - t) * t * t * p2[1] + t * t * t * end[1];
+        var lg = el("g", { "class": "f-el", "data-edge": eid }, topLayer);
+        var tw = 12; for (var ci = 0; ci < e.t.length; ci++) tw += e.t.charCodeAt(ci) > 0x2E7F ? 11.5 : 6.6; tw = Math.max(24, tw);
+        var horiz = (sa === "l" || sa === "r") && (sb === "l" || sb === "r");
+        var gap = horiz ? Math.abs(end[0] - p0[0]) : Math.abs(end[1] - p0[1]);
+        if (horiz && tw > gap - 6) my = Math.min(p0[1], end[1]) - 15;
+        else if (!horiz && sa !== sb && 20 > gap - 4) mx = Math.max(p0[0], end[0]) + tw / 2 + 8;
+        el("rect", { x: mx - tw / 2, y: my - 10, width: tw, height: 18, rx: 5 }, lg);
+        txt(lg, mx, my + 3.5, e.t, "");
+        items.push(lg);
+      }
+      [as[0], bs[0]].forEach(function (id) { (nodeEdges[id] = nodeEdges[id] || []).push({ items: items, other: id === as[0] ? bs[0] : as[0] }); });
+    });
+    var nodeEls = {};
+    spec.nodes.forEach(function (n) {
+      var P = N[n.id], g = el("g", { "class": "f-node" + (n.k ? " k-" + n.k : ""), "data-node": n.id }, nodeLayer);
+      el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 9, "class": "f-box" }, g);
+      txt(g, P.cx, P.y + (n.s ? 21 : 23.5), n.t, "f-t");
+      if (n.s) txt(g, P.cx, P.y + 39, n.s, "f-s");
+      [[P.x, P.cy], [P.x + P.w, P.cy], [P.cx, P.y], [P.cx, P.y + P.h]].forEach(function (h) { el("circle", { cx: h[0], cy: h[1], r: 2.6, "class": "f-handle" }, g); });
+      nodeEls[n.id] = g;
+      g.addEventListener("mouseenter", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.add("f-on"); g.classList.add("hl");
+        (nodeEdges[n.id] || []).forEach(function (c) { c.items.forEach(function (x) { x.classList.add("hl"); }); nodeEls[c.other].classList.add("hl"); });
+      });
+      g.addEventListener("mouseleave", function () {
+        if (svg.classList.contains("f-step")) return;
+        svg.classList.remove("f-on"); each(".hl", function (x) { x.classList.remove("hl"); }, svg);
+      });
+    });
+    host.appendChild(svg);
+    try {   // grow the canvas to whatever was drawn (loop edges can swing outside the grid)
+      var bb = svg.getBBox(), x0 = Math.min(0, bb.x - 12), y0 = Math.min(0, bb.y - 12);
+      var x1 = Math.max(W, bb.x + bb.width + 12), y1 = Math.max(H, bb.y + bb.height + 12);
+      svg.setAttribute("viewBox", x0 + " " + y0 + " " + (x1 - x0) + " " + (y1 - y0)); svg.setAttribute("width", x1 - x0);
+      bg.setAttribute("x", x0); bg.setAttribute("y", y0); bg.setAttribute("width", x1 - x0); bg.setAttribute("height", y1 - y0);
+    } catch (err) {}
+  }
+  function initFlows() {
+    each(".flow-body[data-flow]", function (h) {
+      try { renderFlow(h, JSON.parse(h.getAttribute("data-flow"))); } catch (e) { h.textContent = "diagram error: " + e; }
+    });
+  }
+
+  // ------------------------------------------------------------------ steppers (with flow highlighting + autoplay)
+  function initStepper(root) {
+    var steps = Array.prototype.slice.call(root.querySelectorAll(":scope > .st-body > .step"));
+    if (!steps.length) return;
+    root.classList.add("js");
+    var count = root.querySelector(".st-count"), prev = root.querySelector(".st-prev"), next = root.querySelector(".st-next");
+    var play = root.querySelector(".st-play"), dotsBox = root.querySelector(".st-dots"), dia = root.querySelector(".st-diagram");
+    var seen = {}, cur = 0, timer = null;
+    var dots = steps.map(function (s, i) {
+      var b = document.createElement("button"); b.className = "st-dot"; b.type = "button"; b.textContent = String(i + 1);
+      b.title = (s.querySelector(".step-title") || {}).textContent || "";
+      b.addEventListener("click", function () { stop(); show(i); }); dotsBox.appendChild(b); return b;
+    });
+    function show(i) {
+      cur = Math.max(0, Math.min(steps.length - 1, i)); seen[cur] = true;
+      steps.forEach(function (s, j) { s.classList.toggle("active", j === cur); });
+      dots.forEach(function (d, j) { d.classList.toggle("on", j === cur); d.classList.toggle("seen", !!seen[j]); });
+      count.textContent = (cur + 1) + " / " + steps.length; prev.disabled = cur === 0; next.disabled = cur === steps.length - 1;
+      if (!dia) return;
+      var hl = (steps[cur].getAttribute("data-hl") || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      each("svg", function (svg) { svg.classList.toggle("f-step", hl.length > 0); }, dia);
+      each("[data-node]", function (n) { n.classList.toggle("hl", hl.indexOf(n.getAttribute("data-node")) >= 0); }, dia);
+      each("[data-edge]", function (e) { var ab = e.getAttribute("data-edge").split(">"); e.classList.toggle("hl", hl.indexOf(ab[0]) >= 0 && hl.indexOf(ab[1]) >= 0); }, dia);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = play.getAttribute("data-play"); } }
+    play.addEventListener("click", function () {
+      if (timer) { stop(); return; }
+      if (cur === steps.length - 1) show(0);
+      play.textContent = play.getAttribute("data-pause");
+      timer = setInterval(function () { if (cur >= steps.length - 1) stop(); else show(cur + 1); }, 2600);
+    });
+    prev.addEventListener("click", function () { stop(); show(cur - 1); });
+    next.addEventListener("click", function () { stop(); show(cur + 1); });
+    root.setAttribute("tabindex", "0");
+    root.addEventListener("keydown", function (e) {
+      if (e.target !== root) return;
+      if (e.key === "ArrowRight") { stop(); show(cur + 1); e.preventDefault(); }
+      if (e.key === "ArrowLeft") { stop(); show(cur - 1); e.preventDefault(); }
+    });
+    show(0);
+  }
+
+  // ------------------------------------------------------------------ tabs, copy, scroll-spy, progress
+  function initTabs() {
+    each(".tabs", function (t) {
+      var btns = t.querySelectorAll(":scope > .tab-heads > .tab-btn"), panes = t.querySelectorAll(":scope > .tab-pane");
+      Array.prototype.forEach.call(btns, function (b, i) {
+        b.addEventListener("click", function () {
+          Array.prototype.forEach.call(btns, function (x, j) { x.classList.toggle("on", i === j); });
+          Array.prototype.forEach.call(panes, function (x, j) { x.classList.toggle("on", i === j); });
+        });
+      });
+    });
+  }
+  function initCopy() {
+    each(".codebox .copy", function (b) {
+      b.addEventListener("click", function () {
+        var code = b.closest(".codebox").querySelector("code").innerText, label = b.textContent;
+        var done = function () { b.textContent = BODY.getAttribute("data-copied") || "✓"; setTimeout(function () { b.textContent = label; }, 1200); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {}); else done();
+      });
+    });
+  }
+  function initSpy() {
+    var links = Array.prototype.slice.call(document.querySelectorAll(".sidebar a[href^='#'], .outline a[href^='#']"));
+    if (!links.length) return;
+    var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+    function onScroll() {
+      var best = -1;
+      targets.forEach(function (t, i) { if (t && t.getBoundingClientRect().top < 130) best = i; });
+      var id = best >= 0 && targets[best] ? targets[best].id : null;
+      links.forEach(function (a) { a.classList.toggle("cur", !!id && a.getAttribute("href") === "#" + id); });
+    }
+    addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  }
+  function initProgress() {
+    var done = store.get("done", {}) || {};
+    var box = document.getElementById("done-box");
+    if (box) {
+      var id = box.getAttribute("data-id"); box.checked = !!done[id];
+      box.addEventListener("change", function () { var d = store.get("done", {}) || {}; if (box.checked) d[id] = true; else delete d[id]; store.set("done", d); });
+    }
+    each(".sidebar a[data-id]", function (a) { a.classList.toggle("done", !!done[a.getAttribute("data-id")]); });
+    var cards = document.querySelectorAll(".card[data-id]");
+    if (!cards.length) return;
+    function refresh() {
+      var d = store.get("done", {}) || {}, n = 0, mins = 0, total = 0;
+      Array.prototype.forEach.call(cards, function (c) {
+        var m = +c.getAttribute("data-min") || 0, on = !!d[c.getAttribute("data-id")]; total += m;
+        c.classList.toggle("done", on); var cb = c.querySelector("input.chk"); if (cb) cb.checked = on;
+        if (on) { n += 1; mins += m; }
+      });
+      var bar = document.getElementById("prog-bar"), t = document.getElementById("prog-text");
+      if (bar) bar.style.width = (100 * n / cards.length).toFixed(1) + "%";
+      if (t) t.textContent = (t.getAttribute("data-fmt") || "{n} / {N} · {m} / {M} min")
+        .replace("{n}", n).replace("{N}", cards.length).replace("{m}", mins).replace("{M}", total);
+    }
+    each("input.chk", function (cb) {
+      cb.addEventListener("click", function (e) { e.stopPropagation(); });
+      cb.addEventListener("change", function () {
+        var d = store.get("done", {}) || {}, id = cb.closest(".card").getAttribute("data-id");
+        if (cb.checked) d[id] = true; else delete d[id]; store.set("done", d); refresh();
+      });
+    });
+    refresh();
+  }
+
+  function boot() {
+    initTheme(); initFlows(); each(".stepper", initStepper); initTabs(); initCopy(); initSpy(); initProgress();
+    if (window.hljs) each("pre code[class*='language-']", function (c) { try { window.hljs.highlightElement(c); } catch (e) {} });
+    if (PRINT) each("details", function (d) { d.open = true; });
+    document.documentElement.setAttribute("data-ready", "1");
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();
+
+</script>
+</body>
+</html>

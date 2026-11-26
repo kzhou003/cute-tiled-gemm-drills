@@ -2,7 +2,7 @@
   "title": "从零设计 Tiled GEMM：Layout、Layout Algebra、CuTe 编译、TMA / Pipeline / Warp Specialization / PDL 练习",
   "brand": "Tiled GEMM 练习",
   "kicker": "CuTe · Tiled GEMM · 编译与异步执行",
-  "lede": "15 道一小时左右的练习，沿着一条主线走完：先只从硬件需求出发，亲手推导一个 64×64 Tiled GEMM 需要的五种映射（CTA tile、Copy TV、SMEM swizzle、MMA fragment、accumulator），再把它们拼成一个完整可验证的 GEMM；然后用 Layout Algebra 重新表达这些映射、看 CuTe 在编译期怎样化简和检查它们；最后把 TMA、mbarrier pipeline、warp specialization 和 PDL 加进来，得到一个结构完整的现代 GEMM，并用代价模型选配置。期望答案来自本机编译运行的真实 CuTe，也给出真实的 CUTLASS 源码对照。",
+  "lede": "20 道一小时左右的练习，沿着一条主线走完：先只从硬件需求出发，亲手推导一个 64×64 Tiled GEMM 需要的五种映射（CTA tile、Copy TV、SMEM swizzle、MMA fragment、accumulator），再把它们拼成一个完整可验证的 GEMM；然后用 Layout Algebra 重新表达这些映射、看 CuTe 在编译期怎样化简和检查它们；最后把 TMA、mbarrier pipeline、warp specialization 和 PDL 加进来，得到一个结构完整的现代 GEMM，并用代价模型选配置。期望答案来自本机编译运行的真实 CuTe，也给出真实的 CUTLASS 源码对照。",
   "lang": "zh",
   "slug": "cute-tiled-gemm-drills",
   "repo_url": "https://github.com/kzhou003/cute-tiled-gemm-drills",
@@ -38,6 +38,11 @@
       "id": "E",
       "title": "Track E · 完整成熟的 Tiled GEMM",
       "desc": "把所有部件拼成一个带 TMA、流水线、warp specialization 和 PDL 的 GEMM 模拟，并在约束下选配置。"
+    },
+    {
+      "id": "F",
+      "title": "Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）",
+      "desc": "把 Track A–E 的映射和流水线写成真正能在 GPU 上跑的 CuTe C++ kernel：SIMT → Tensor Core → 多级流水线 + ldmatrix → 边界与 epilogue → 配置扫描、split-K 与 cuBLAS 对比。每题都有一个没有 GPU 也能做的主机部分（和真实 CuTe 对拍），以及一个在 5090 上编译、对拍、计时的 GPU 部分。"
     }
   ],
   "drills": [
@@ -362,10 +367,68 @@
         "GPU",
         "Config"
       ]
+    },
+    {
+      "id": "F1",
+      "stem": "f1_simt_cute_gemm",
+      "title": "第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM",
+      "minutes": 60,
+      "difficulty": "中",
+      "track": "F",
+      "given": [
+        "_check_t"
+      ]
+    },
+    {
+      "id": "F2",
+      "stem": "f2_tensorcore_gemm",
+      "title": "第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）",
+      "minutes": 75,
+      "difficulty": "难",
+      "track": "F",
+      "given": [
+        "_check_t"
+      ]
+    },
+    {
+      "id": "F3",
+      "stem": "f3_pipelined_gemm",
+      "title": "多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环",
+      "minutes": 90,
+      "difficulty": "难",
+      "track": "F",
+      "given": []
+    },
+    {
+      "id": "F4",
+      "stem": "f4_epilogue_residue",
+      "title": "边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回",
+      "minutes": 70,
+      "difficulty": "中",
+      "track": "F",
+      "given": []
+    },
+    {
+      "id": "F5",
+      "stem": "f5_config_sweep_splitk",
+      "title": "在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比",
+      "minutes": 90,
+      "difficulty": "难",
+      "track": "F",
+      "given": [
+        "Cfg",
+        "_ranks"
+      ]
     }
   ],
   "knowledge": [
     "overview",
+    "hardware",
+    "execution",
+    "sizing",
+    "tile_dims",
+    "config",
+    "e2e",
     "from_scratch",
     "algebra_compile",
     "time_dimension",

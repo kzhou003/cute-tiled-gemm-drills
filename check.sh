@@ -6,6 +6,8 @@
 #   ./check.sh a1 --solutions     # run the reference solution instead (DRILL_IMPL=solutions)
 #   ./check.sh oracle a1          # regenerate tests/golden/ for a1 with real CuTe (needs tools/fetch_headers.sh)
 #   ./check.sh oracle all
+#   ./check.sh f3 -s              # Track F: host part + .cu type check; on a GPU machine also nvcc, run, compare, time
+#                                   (-s shows every JSON line; CUTE_DRILL_ARCH=sm_86 for other GPUs, default sm_120)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -14,13 +16,14 @@ oracle_one() {
     c1) oracle/run.sh c1 && oracle/c1_asm.sh ;;
     c2) oracle/c2_try_compile.sh ;;
     d3|d4|e1|e2) echo "$1: no CuTe oracle (protocol / timeline simulator written from the CUTLASS source)" ;;
+    f3|f5) echo "$1: no CuTe oracle (the host part is a loop trace / cost model; the GPU tests check the kernel)" ;;
     *) oracle/run.sh "$1" ;;
   esac
 }
 if [[ "${1:-}" == "oracle" ]]; then
   which="${2:?usage: ./check.sh oracle <id|all>}"
   if [[ "$which" == "all" ]]; then
-    for i in a1 a2 a3 a4 a5 b1 b2 c1 c2 d1 d2; do oracle_one "$i"; done
+    for i in a1 a2 a3 a4 a5 b1 b2 c1 c2 d1 d2 f1 f2 f4; do oracle_one "$i"; done
   else
     oracle_one "$which"
   fi

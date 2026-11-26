@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">B1 · Track B · 用 Layout Algebra 重新表达 · 60 分钟 · 难</div><h1>B1 · 用 Layout Algebra 重写 Track A：zipped_divide、raked_product + right_inverse、Swizzle ∘ Layout</h1><p class="lede">Track A 用手写公式回答了“CTA 拿哪块、线程搬哪些、SMEM 放哪里”。CuTe 不写这些公式，而是用 Layout Algebra 把它们构造出来：local_tile 是 zipped_divide 加切片，Copy TV 是 raked_product 的 right_inverse，SMEM 是 Swizzle 和普通 layout 的 composition。本题用和真实 CuTe 逐字符一致的 Python 代数写出这三个构造，并证明它们和 Track A 的手写公式是同一个函数。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/b1_algebra_rewrite.py"><code>mine/b1_algebra_rewrite.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_b1_algebra_rewrite.py"><code>tests/test_b1_algebra_rewrite.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/b1_algebra_rewrite.py"><code>solutions/b1_algebra_rewrite.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="B1"> 我已完成这道题</label></header>
 <h2 id="b1-1">题面速览</h2>
@@ -310,14 +322,205 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="b1-3">图解：三个构造</h2>
 
 <figure class="flow"><div class="flow-head">Track A 的手写公式 ↔ CuTe 的代数构造<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;Track A 的手写公式 ↔ CuTe 的代数构造&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;h1&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;CTA tile 偏移&quot;, &quot;s&quot;: &quot;(32bm+r)·64 + 16k + c&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a1&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;zipped_divide + 切片&quot;, &quot;s&quot;: &quot;((32,16),(2,4))&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h2&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;Copy TV&quot;, &quot;s&quot;: &quot;(t//4, 4(t%4)+v)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a2&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;right_inverse(raked)&quot;, &quot;s&quot;: &quot;((4,32),4):((128,1),32)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;h3&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 2.0, &quot;t&quot;: &quot;SMEM 偏移&quot;, &quot;s&quot;: &quot;16r+c，异或 [4,6)→[2,4)&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;a3&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 2.0, &quot;t&quot;: &quot;Swizzle ∘ Layout&quot;, &quot;s&quot;: &quot;Sw&lt;2,2,2&gt; o (32,16)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;h1&quot;, &quot;b&quot;: &quot;a1&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;h2&quot;, &quot;b&quot;: &quot;a2&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;h3&quot;, &quot;b&quot;: &quot;a3&quot;, &quot;t&quot;: &quot;same_function&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 360.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 230.0}}"></div><figcaption>右边三个都是真实 CuTe 打印出来的 layout；左边是 A1–A3 手写的公式。测试在每个定义域点上检查两边相等。</figcaption></figure>
-<h2 id="b1-4">逐步演示</h2>
+<h2 id="b1-4">从小例子开始：先在草稿纸上手算</h2>
+<p>这一题的三个构造（divide、product + inverse、swizzle）都是“对 layout 做运算”。直接看 64×64、128 个线程会被数字淹没。先拿一个小到每个格子都能写出来的 layout 把每个运算手算一遍，再换成测试里的尺寸（数字变大，步骤一模一样），最后写成一般公式。下面的草稿纸就是你自己推这道题时应该写下的东西。</p>
+<p>① 小：8 个元素的 layout</p>
+<p>一维 <code>8:1</code> 切成 4 个一块；二维 <code>(4,4):(4,1)</code> 切成 2×2 的块；4 个线程、每人 2 个值；一行 16 个元素做 swizzle。每个数都能手写。</p>
+<pre><code>logical_divide(8:1, 4) = (4,2):(1,4)
+zipped_divide((4,4):(4,1), (2,2))
+  = ((2,2),(2,2)):((4,1),(8,2))
+thr (2,2):(2,1) · val (1,2) → tile (2,4)
+</code></pre>
+<p>② 测试的尺寸</p>
+<p>同样的四步，只是数字变大。</p>
+<pre><code>zipped_divide((64,64):(64,1), (32,16))
+  = ((32,16),(2,4)):((64,1),(2048,16))
+layout_tv = ((4,32),4):((128,1),32)
+Sw&lt;2,2,2&gt;：(1,0) → 20
+</code></pre>
+<p>③ 换一组 thr / val</p>
+<p>测试 <code>test_make_layout_tv_generalizes</code> 换两组配置，代数不变，只有 stride 跟着变。</p>
+<pre><code>(8,4):(4,1) · (2,2):(2,1) → tile (16,8)
+layout_tv = ((4,8),(2,2)):((32,2),
+(16,1))
+</code></pre>
+<p>④ 一般从 ①–③ 里看出来的规律。</p>
+<pre><code>tile 的偏移 = Σ 块号 · (块大小 · 原 stride)
+TV = 把 (m,k) → t + T·v 这个双射倒过来
+swizzle：c' = c XOR 4·(r % 4)（一次换 4
+个）
+</code></pre>
+<p><strong>✎</strong> 草稿纸 1：layout 是一个函数，divide 只是把下标重新分组</p>
+<pre><code class="language-text">0) 先会求值。L = (4,2):(1,4)：坐标 (r, c) → r·1 + c·4
+      (2,1) → 2·1 + 1·4 = 6
+   也可以喂一个整数 i：先按 colex 拆成坐标 (i % 4, i // 4)，再求值
+      i = 6 → (2, 1) → 6          L.map() = [0,1,2,3,4,5,6,7]
+   换 stride：(4,2):(2,1) 的 (2,1) → 2·2 + 1·1 = 5   map = [0,2,4,6,1,3,5,7]
+1) 一维 divide：logical_divide(8:1, 4)
+      tiler 4:1 走过 {0,1,2,3}
+      complement(4:1, 8) = 2:4         ← “tile 没碰到的部分”怎么走：下一块从 4 开始
+      make_layout(4:1, 2:4) = (4,2):(1,4)
+      8:1 ∘ (4,2):(1,4) = (4,2):(1,4)  ← 第 0 维 = 块内，第 1 维 = 第几块
+   tiler 换成 2:2（隔一个取一个）：
+      complement(2:2, 8) = (2,2):(1,4)
+      logical_divide(8:1, 2:2) = (2,(2,2)):(2,(1,4))   map = [0,2 | 1,3 | 4,6 | 5,7] → 第 0 块 {0,2}、第 1 块 {1,3}、第 2 块 {4,6}、第 3 块 {5,7}
+2) 二维：g = (4,4):(4,1)（行主序，和 gA 一样 K 连续），tiler (2,2)，按模式各切各的
+      第 0 维 4:4 ÷ 2 → 4:4 ∘ (2:1, complement(2:1, 4) = 2:2) = (2,2):(4,8)
+      第 1 维 4:1 ÷ 2 → (2,2):(1,2)
+      logical_divide = ((2,2),(2,2)):((4,8),(1,2))      ← 每一维是 (块内, 第几块)
+      zip：把两个“块内”放一起，两个“第几块”放一起
+      zipped_divide  = ((2,2),(2,2)):((4,1),(8,2))      ← (tile, rest)
+3) 切片 (_, (1,1))：tile 模式保留，rest 模式代入坐标
+      rest(1,1) = 1·8 + 1·2 = 10        tile = (2,2):(4,1)
+      local_tile_view(g, (2,2), (1,1)) = ((_2,_2):(_4,_1), 10)
+      tile_map = [10+0, 10+4, 10+1, 10+5] = [10, 14, 11, 15]
+      手写 (2·1 + r)·4 + 2·1 + c：(0,0)→10  (1,0)→14  (0,1)→11  (1,1)→15   ✓ 同一个函数
+</code></pre>
+<p><strong>✎</strong> 草稿纸 2：Copy TV = raked_product 再取逆；SMEM = swizzle 一下偏移</p>
+<pre><code class="language-text">4) thr = (2,2):(2,1)（4 个线程排成 2×2，行主序），val = (1,2)（每人一行里 2 个相邻值）
+      complement(thr) = _1:_4                    ← thr 占满 [0,4)，下一份从 4 开始
+      logical_product = (thr, complement(thr) ∘ val) = ((2,2),(1,2)):((2,1),(0,4))
+      raked = 每一维 (val 在内侧, thr 在外侧)：
+      layout_mn = ((1,2),(2,2)):((0,2),(4,1))    tiler = (1·2, 2·2) = (2, 4)
+      layout_mn 的值表（值 i = t + 4·v）：
+                k=0    k=1    k=2    k=3
+         m=0     0      4      1      5         (0,2)：m → (0,0)，k=2 → (0,1)：0·4 +
+1·1 = 1
+         m=1     2      6      3      7         → i = 1 → t = 1 % 4 = 1，v = 1 // 4 =
+0
+      读法：线程 1 的两个值在 (0,2)、(0,3)；手写 (t // 2, 2·(t % 2) + v) 也给出这两个
+5) right_inverse(layout_mn)：
+      coalesce → (4,2):(2,1)        前缀积 pre = (1, 4, 8)
+      stride 从小到大：stride 1（shape 2, pre 4）== curr 1 ✓ 追加 2:4，curr = 2
+                       stride 2（shape 4, pre 1）== curr 2 ✓ 追加 4:1，curr = 8
+      R = (2,4):(4,1)               检查 layout_mn(R(1)) = layout_mn(4) = 1 ✓
+      with_shape(R, (4, 2)) = ((2,2),2):((4,1),2) = layout_tv
+      layout_tv(3, 1)：t=3 → (1,1) → 1·4 + 1·1 = 5，v=1 → 1·2 = 2，合计 7
+        → (7 % 2, 7 // 2) = (1, 3)；手写 (3 // 2, 2·1 + 1) = (1, 3) ✓
+6) Swizzle&lt;2,2,2&gt;：把第 [4,6) 位异或到第 [2,4) 位；base = 16r + c
+      (1,0)：x = 16 = 0b01_0000，[4,6) = 01 → 右移 2 → 0b0100 = 4，16 XOR 4 = 20
+      (5,7)：x = 87 = 0b101_0111，[4,6) = 01 → 4，87 XOR 4 = 83 = 16·5 + 3
+      (2,5)：x = 37 = 0b10_0101，[4,6) = 10 → 8，37 XOR 8 = 45 = 16·2 + 13
+      规律：第 [4,6) 位就是 r % 4，于是 c' = c XOR 4·(r % 4)：一行里按 4 个一组换位置
+</code></pre>
+<p>下面这张图让你随意改小尺寸的 gA 和 tiler（行主序 <code>(M,K):(K,1)</code> ，tiler 必须整除）。左边每格写的是 gA 的偏移 <code>m·K +</code> <code>k</code> ，颜色是它属于哪个 tile；右边是选中 tile 的视图，每格写的是 <code>tile_map</code> 的值，角上的小字是视图下标 i。面板打印的就是 <code>local_tile_view</code> / <code>tile_map</code> / <code>hand_local_tile</code> 对这组参数应该返回的东西。默认参数就是草稿纸第 2、3 步。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 小 gA 上的 zipped_divide + 切片</div><img src="../figs/b1/b1_new-01.png" alt="手算草稿 · 小 gA 上的 zipped_divide + 切片" loading="lazy" style="width:100%;aspect-ratio:1461/1086"></figure>
+<h2 id="b1-5">图解详解：三个映射怎样由代数构造出来</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>这一节把整道题画成五张可交互的图，顺序和你要写的函数一致：先确认“layout 就是坐标 → 下标的函数”（图 1），再看 <code>local_tile_view</code> 怎样由 zipped_divide 加切片得到（图 2），然后是 Copy TV 的两半：raked_product 给出正向表（图 3），right_inverse 把它倒过来（图 4 小例子、图 5 真实尺寸），最后是 SMEM 的 swizzle（图 6）。每张图下方的面板都把当前状态逐步代入公式，数字和参考解、真实 CuTe 的输出一致。</p>
+<p>整道题的骨架只有下面几行，剩下的都是在验证“代数构造 == 手写公式”：</p>
+<pre><code>z = zipped_divide(gA, (32, 16))                     # 图 2：((tile), (rest))
+tile, off = z.mode(0), z.mode(1)(coord)             #       切片 (_, coord)
+layout_mn = raked_product(thr, val)                 # 图 3：(m, k) → t + 128·v
+layout_tv = with_shape(right_inverse(layout_mn), (128, 4))   # 图 4/5：(t, v) → m + 32·k
+smem[i]   = swizzle(2, 2, 2, base(i))               # 图 6：Sw&lt;2,2,2&gt; ∘ (32,16):(16,1)
+</code></pre>
+<h3 id="b1-5-1">图 1 · Layout 就是函数：坐标 → 下标</h3>
+<p>CuTe 的 layout <code>Shape:Stride</code> 是一个函数：把坐标的每个分量乘上对应的 stride 再相加。坐标可以是二维的 (r, c)，也可以是一个整数 i（先按 colex，即第一维最快，拆成坐标）。嵌套的 shape（比如 <code>(2,2)</code> 作为一维）也照此递归拆开。左边网格每格写的是 <code>L(r, c)</code> ；下面一行是同一个函数按一维下标 i 排开的 <code>L(i)</code> ，i = r + R·c。几个预设都是本页后面会出现的 layout，先把它们“看成表”。</p>
+
+<figure class="flow snap"><div class="flow-head">L(r, c) 与 L(i)</div><img src="../figs/b1/b1_new-02.png" alt="L(r, c) 与 L(i)" loading="lazy" style="width:100%;aspect-ratio:1461/1112"></figure>
+<p>参考：CuTe 文档 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/01_layout.md">01_layout.md</a> （Shape、Stride、colex 下标），求值本身是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/stride.hpp#L60">crd2idx</a> 。</p>
+<h3 id="b1-5-2">图 2 · <code>local_tile_view</code> ：zipped_divide 把下标重新分组，切片只剩一个偏移</h3>
+<p>gA 是 64×64 的行主序矩阵 <code>(64,64):(64,1)</code> 。<code>logical_divide(gA, (32,16))</code> 按维各切各的：m 维变成 <code>(32,2): (64,2048)</code> （块内 32 行、共 2 块，下一块跳 32·64 = 2048），k 维变成 <code>(16,4):(1,16)</code> 。<code>zipped_divide</code> 再把两个“块内”模式拼成第 0 维、两个“第几块”拼成第 1 维。右边画的就是这次重新分组：数字一个没变，只是括号换了位置。最后切片 <code>(_, (bm, k))</code> ：tile 模式原样保留，rest 模式代入坐标，变成一个常数偏移。</p>
+<p>点 bm / k 换 tile，或者“▶ 播放”把 8 个 tile 走一遍。悬停左边任何一格，看它的偏移怎样拆成“tile 内 + rest”。</p>
+
+<figure class="flow snap"><div class="flow-head">zipped_divide((64,64):(64,1), (32,16)) 与切片</div><img src="../figs/b1/b1_new-03.png" alt="zipped_divide((64,64):(64,1), (32,16)) 与切片" loading="lazy" style="width:100%;aspect-ratio:1461/1297"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1596-L1625">logical_divide</a> （就是 <code>composition(layout, make_layout(tiler, complement(tiler, shape(coalesce(layout)))))</code> 这一行）、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1647-L1656">zipped_divide</a> （<code>tile_unzip(logical_divide(...))</code> ）、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1271-L1287">complement</a> ；tensor 版的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/tensor_impl.hpp#L1030-L1045">local_tile</a> 只是在这之上切片。文档：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/02_layout_algebra.md#L381-L481">02_layout_algebra.md · Division (Tiling)</a> ，里面的 1-D / 2-D 例子和草稿纸第 1、2 步是同一类算式。</p>
+<h3 id="b1-5-3">图 3 · <code>raked_product</code> ：正向表 (m, k) → t + 128·v</h3>
+<p>先回答“tile 里第 (m, k) 个元素由谁搬”。<code>raked_product(thr, val)</code> 先算 <code>logical_product(thr, val) = (thr, complement(thr) ∘ val)</code> ：thr 占满 [0, 128)，complement 是 <code>_1:_128</code> ，所以 val 的第 v 个值被放到 <code>128·v</code> 。然后把每一维写成 (val 在内侧, thr 在外侧)。结果 <code>layout_mn</code> 的值是 <code>i = t + 128·v</code> 。</p>
+<p>下图每格写的是线程号 t，颜色是 v。注意一个线程的 4 个值（4 种颜色）在 k 方向相邻，线程沿 k 每 4 列换一个、沿 m 每行跳 4 个：这就是 thr <code>(32,4):(4,1)</code> 的行主序排列。切换预设看另外两组配置（测试 <code>test_make_layout_tv_generalizes</code> ）。</p>
+
+<figure class="flow snap"><div class="flow-head">layout_mn = raked_product(thr, val)</div><img src="../figs/b1/b1_new-04.png" alt="layout_mn = raked_product(thr, val)" loading="lazy" style="width:100%;aspect-ratio:1461/1618"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1789-L1803">raked_product</a> （<code>zip(get&lt;1&gt;(result), get&lt;0&gt;(result))</code> ：rest 在前，所以 thr 落在外侧）、</p>
+<p><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1690-L1698">logical_product</a> ；文档 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/02_layout_algebra.md#L545-L569">Blocked and Raked Products</a> 。</p>
+<h3 id="b1-5-4">图 4 · <code>right_inverse</code> ：把箭头倒过来（小例子）</h3>
+<p>正向表回答“(m, k) 归谁”，但 copy 需要的是反方向：“线程 t 的第 v 个值在哪”。right_inverse 就是把每条箭头反过来。用 4 个线程 × 2 个值的小例子看清楚：上面一排是 TV 下标 i = t + 4·v，下面是 tile。切到“正向”看 layout_mn 的箭头（格子 → i），切到“反向”看 layout_tv 的箭头（i → 格子）。面板一步步跑 right_inverse 的算法：coalesce、按 stride 排序、逐个拼接。</p>
+
+<figure class="flow snap"><div class="flow-head">right_inverse(layout_mn) 与 with_shape</div><img src="../figs/b1/b1_new-05.png" alt="right_inverse(layout_mn) 与 with_shape" loading="lazy" style="width:100%;aspect-ratio:1461/1519"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L1295-L1345">right_inverse</a> （注释写的就是 <code>layout(result(i)) == i</code> ；算法和面板里的步骤一致：coalesce → 前缀积 → 按 stride 排序 → fold）。<code>with_shape</code> 是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/layout.hpp#L206">Layout::with_shape</a> ，等于 <code>composition(*this, make_layout(shape))</code> 。</p>
+<h3 id="b1-5-5">图 5 · <code>tv_coord</code> / <code>owner</code> ：真实尺寸的双向查表</h3>
+<p>换回测试的 128 线程 × 4 值。选一个线程 t 和值 v，图里高亮它的 4 个格子；面板把 <code>layout_tv((t, v))</code> 逐项算出来，再解码成 (m, k) = (off % 32, off // 32)，并与手写 <code>(t // 4, 4·(t % 4) + v)</code> 和 <code>owner</code> 对照。悬停任意格子，则是反方向的 owner 查询。默认状态 (5, 2) 就是测试里的 <code>tv_coord(tv, tiler, 5, 2) == (1, 6)</code> 。</p>
+
+<figure class="flow snap"><div class="flow-head">layout_tv：(t, v) → (m, k)，owner：(m, k) → (t, v)</div><img src="../figs/b1/b1_new-06.png" alt="layout_tv：(t, v) → (m, k)，owner：(m, k) → (t, v)" loading="lazy" style="width:100%;aspect-ratio:1461/1996"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L495-L506">make_tiled_copy</a> 的三行（raked_product → right_inverse.with_shape → product_each）就是你的 <code>make_layout_tv</code> 。</p>
+<h3 id="b1-5-6">图 6 · <code>smem_layout_map</code> ：Swizzle ∘ Layout</h3>
+<p>SMEM tile 是 32×16 的行主序 <code>(32,16):(16,1)</code> ，先算普通偏移 x = 16r + c，再做 <code>Swizzle&lt;2,2,2&gt;</code> ：把 x 的第 [4,6) 位异或到第 [2,4) 位。因为 [4,6) 位正好是 r % 4，[2,4) 位正好是“本行第几个 4 元素组”，所以效果就是 第 r 行的 4 个组按 j → j XOR (r % 4) 换位置，组内 4 个元素的顺序不变。每格写的是 swizzle 后的偏移，颜色是它落在本行的第几个组（物理位置）。下方条带画出选中那一行在内存里的样子。切换 B = 0 看没有 swizzle 的对照（测试里的 <code>smem_A_plain</code> ）。</p>
+
+<figure class="flow snap"><div class="flow-head">Sw&lt;B,2,2> ∘ (32,16):(16,1)</div><img src="../figs/b1/b1_new-07.png" alt="Sw&lt;B,2,2> ∘ (32,16):(16,1)" loading="lazy" style="width:100%;aspect-ratio:1461/1566"></figure>
+<p>源码对照：<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle.hpp#L55">Swizzle</a> （<code>apply</code> 就是 <code>offset ^ shiftr(offset &amp; yyy_msk, msk_sft)</code> ，头部注释画了 YY / ZZ 两组位）、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/swizzle_layout.hpp#L316-L325">composition(Swizzle, Layout)</a> （返回 <code>ComposedLayout</code> ，打印成 <code>Sw&lt;2,2,2&gt; o _0 o (_32,_16):(_16,_1)</code> ）。</p>
+<h3 id="b1-5-7">速查：代数构造 ↔ 手写公式</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>代数构造</th>
+<th>手写公式（Track A）</th>
+<th>运行例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local_tile_view(gA, tiler, coord)</code></td>
+<td><code>z = zipped_divide(gA, tiler)</code> ；返回 <code>(z.mode(0), z.mode(1)(coord))</code></td>
+<td>偏移 = bm·(32·64) + k·16</td>
+<td>(1,2) → <code>((_32,_16): (_64,_1), 2080)</code></td>
+</tr>
+<tr>
+<td><code>tile_map(L, off)</code></td>
+<td><code>[off + L(i) for i inrange(size)]</code></td>
+<td>—</td>
+<td>(0,0) → [0, 64,128, …]</td>
+</tr>
+<tr>
+<td><code>hand_local_tile(bm, k)</code></td>
+<td>—</td>
+<td><code>(32bm + r)·64 + 16k + c</code> ，i = r + 32c</td>
+<td>与 tile_map 逐项相同</td>
+</tr>
+<tr>
+<td><code>make_layout_tv (thr, val)</code></td>
+<td><code>mn = raked_product(thr, val)</code> ；<code>tv = with_shape(right_inverse(mn), (|thr|, |val|))</code> ；tiler = 每个模式的 size</td>
+<td>—</td>
+<td><code>((_4,_32),_4): ((_128,_1),_32)</code>，(32, 16)</td>
+</tr>
+<tr>
+<td><code>tv_coord(tv, tiler, t, v)</code></td>
+<td><code>off = tv((t, v))</code> ；<code>(off % 32, off // 32)</code></td>
+<td><code>hand_copy_coord = (t // 4, 4(t % 4) + v)</code></td>
+<td>(5, 2) → 193 → (1,6)</td>
+</tr>
+<tr>
+<td><code>owner(mn, m, k)</code></td>
+<td><code>i = mn((m, k))</code> ；<code>(i % 128, i // 128)</code></td>
+<td>(4m + k // 4, k % 4)</td>
+<td>(31, 15) → 511 → (127, 3)</td>
+</tr>
+<tr>
+<td><code>smem_layout_map(swz, base)</code></td>
+<td><code>[swizzle(B, M, S, base(i))]</code> ，i = r + 32c</td>
+<td><code>hand_smem_offset = x ^ ((x &gt;&gt; 2) &amp; 0b1100)</code> ，x = 16r + c</td>
+<td>(1, 0) → 20</td>
+</tr>
+<tr>
+<td><code>same_function( f, g, D)</code></td>
+<td><code>all(f(x) == g(x) for x in D)</code> ：在整个定义域上逐点比较，而不是比较打印字符串</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<p>三条规律：divide = “块内 + 第几块”，块的偏移是 块号 × (块大小 × 原 stride)；TV = 先在 tile 坐标里写出容易描述的正向表，再用 right_inverse 倒过来；swizzle = 普通偏移之后再加一层位运算，粒度 2^M = 4 个元素。</p>
+<h2 id="b1-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ make_tiled_copy 的三行：thr = (32,4):(4,1)，val = (1,4)</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;rp&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;raked_product&quot;, &quot;s&quot;: &quot;(m,k) → t+128v&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ri&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;right_inverse&quot;, &quot;s&quot;: &quot;(_4,_128):(_128,_1)&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ws&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;with_shape&quot;, &quot;s&quot;: &quot;(128, 4)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;q&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;tv_coord / owner&quot;, &quot;s&quot;: &quot;两个方向都能查&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;rp&quot;, &quot;b&quot;: &quot;ri&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ri&quot;, &quot;b&quot;: &quot;ws&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ws&quot;, &quot;b&quot;: &quot;q&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="rp"><div class="step-title">1. raked_product</div><p><code>layout_mn = ((_1,_32),(_4,_4)):((_0,_4),(_128,_1))</code>，和真实 CuTe 相同。读法：m 方向 <code>(1,32)</code>，val 的 1 在内侧、thr 的 32 在外侧（stride 4，线程号 +4）；k 方向 <code>(4,4)</code>，val 的 4 在内侧（stride 128 = 下一个值）、thr 的 4 在外侧（stride 1 = 下一个线程）。tiler 是每个模式的 size：(32, 16)。<code>layout_mn(31, 15) = 511</code>，即 (t, v) = (127, 3)。</p>
-</div><div class="step" data-hl="rp,ri"><div class="step-title">2. 取逆</div><p><code>right_inverse(layout_mn) = (_4,_128):(_128,_1)</code>：把 stride 排序（1, 4, 128）后反过来写。它满足 <code>layout_mn(R(i)) = i</code>，测试 <code>test_layout_tv_is_right_inverse_of_layout_mn</code> 对全部 512 个 i 检查。</p>
+</div><div class="step" data-hl="rp,ri"><div class="step-title">2. 取逆</div><p><code>right_inverse(layout_mn) = (_4,_128):(_128,_1)</code>：先 coalesce 成 <code>(_128,_4):(_4,_1)</code>，再按 stride 从小到大（1, 4）把对应的模式依次拼起来，新 stride 取该模式在定义域里的步长（前缀积 128、1）。它满足 <code>layout_mn(R(i)) = i</code>，测试 <code>test_layout_tv_is_right_inverse_of_layout_mn</code> 对全部 512 个 i 检查。</p>
 </div><div class="step" data-hl="ri,ws"><div class="step-title">3. 改形状</div><p><code>with_shape(R, (128, 4)) = ((_4,_32),_4):((_128,_1),_32)</code>。线程模式 <code>(4,32):(128,1)</code>：线程号的低 2 位乘 128（列 4(t%4)，乘 tile 高度 32），高 5 位乘 1（行 t//4）。真实 <code>get_layoutS_TV</code> 是 <code>((_4,_32),(_4,_1)):((_128,_1),(_32,_0))</code>，多一个 size 1 的模式，作为函数完全相同。</p>
 </div><div class="step" data-hl="ws,q"><div class="step-title">4. 两个方向都能查</div><p><code>layout_tv(5, 2) = 193</code>，<code>193 % 32 = 1</code>、<code>193 // 32 = 6</code>：线程 5 的第 2 个值是 tile 的 (1, 6)，和手写 <code>(5 // 4, 4·(5 % 4) + 2)</code> 一致。反过来 <code>owner(layout_mn, 31, 15) = (127, 3)</code>。</p>
 </div></div></div>
-<h2 id="b1-5">易错点</h2>
+<h2 id="b1-7">易错点</h2>
 <ul>
 <li><strong>把 zipped_divide 的 rest 偏移当成 tile 编号。</strong> 切片之后剩下的是 <code>rest(coord)</code> 这个元素偏移：<code>(1, 2) → 2048 + 32 = 2080</code>，不是 <code>1·4 + 2</code>。测试 <code>test_local_tile_view_is_zipped_divide_then_slice</code>。</li>
 <li><strong>把 raked_product 当成 TV layout。</strong> 它的定义域是 tile 坐标，方向是反的；直接拿来当 (t, v) → 坐标，线程 5 会得到错位的结果。测试 <code>test_make_layout_tv_matches_cute</code>。</li>
@@ -325,12 +528,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>tile 偏移按行主序解码。</strong> <code>layout_tv</code> 的值是 colex 偏移 <code>m + 32·k</code>。测试 <code>test_algebraic_copy_tv_equals_hand_formula</code>。</li>
 <li><strong>swizzle 异或的方向写反。</strong> 是把第 [4,6) 位异或到第 [2,4) 位：<code>(1, 0) → 20</code>。测试 <code>test_algebraic_smem_equals_hand_formula</code>。</li>
 </ul>
-<h2 id="b1-6">对照文档</h2>
+<h2 id="b1-8">对照文档</h2>
 <blockquote>
 <p>“因为一个高性能 kernel 中，数据要经过很多次‘重新观察’……若每一步都手写索引公式，代码会脆弱、重复，而且很难证明没有漏元素或冲突。Layout Algebra 的作用是把‘映射与映射之间的关系’变成可组合的运算。”</p>
 </blockquote>
 <p>本题把这几句话变成了可以运行的等式：同一个映射，手写一遍、代数构造一遍，在整个定义域上逐点相等；<code>test_local_tile_views_tile_A_exactly_once</code> 就是文档说的“证明没有漏元素”。</p>
-<h2 id="b1-7">上机验证</h2>
+<h2 id="b1-9">上机验证</h2>
 <pre><code class="language-bash">playground/run.sh playground/b1_algebra_rewrite.cpp   # 真实 CuTe，本机编译运行
 ./check.sh oracle b1                                  # 重新生成 tests/golden/b1_algebra_rewrite.json
 </code></pre>
@@ -344,7 +547,7 @@ tv(5, 0..3) = 129 161 193 225  (column-major index m + 32k in the 32x16 tile)
 smem                       = Sw&lt;2,2,2&gt; o _0 o (_32,_16):(_16,_1)
 </code></pre>
 <p>given 的 Python 代数核心（<code>Layout</code>、<code>composition</code>、<code>zipped_divide</code>…）也在 golden 里校验过：<code>test_given_core_matches_cute_printouts</code> 对 8 个表达式比较真实 CuTe 的打印字符串，从一开始就会通过。</p>
-<h2 id="b1-8">三级提示</h2>
+<h2 id="b1-10">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">gA = Layout((64, 64), (64, 1))
 zipped_divide(gA, (32, 16))                   # ((_32,_16),(_2,_4)):((_64,_1),(_2048,_16))
@@ -380,7 +583,7 @@ smem_layout_map((2, 2, 2), Layout((32, 16), (16, 1)))[1]    # 20（下标 1 = �
 <li>真实版本多了一个 size 1 的模式 <code>(_4,_1):(_32,_0)</code>，它不改变任何点的值。测试比较的是函数值（512 个点），而不是打印字符串。</li>
 </ol>
 </div></details></div></details>
-<h2 id="b1-9">参考解</h2>
+<h2 id="b1-11">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/b1_algebra_rewrite.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/b1_algebra_rewrite.py</span><span class="muted small">657 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;B1 · 用 Layout Algebra 重新表达 Track A 的三个映射：local_tile、Copy TV、SMEM swizzle — reference solution.
 
@@ -1039,7 +1242,7 @@ def hand_smem_offset(r: int, c: int) -&gt; int:
 
 def same_function(f, g, domain) -&gt; bool:
     return all(f(x) == g(x) for x in domain)</code></pre></div></div></details>
-<h2 id="b1-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="b1-12">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li><code>partition_S</code> 内部用 <code>tile2thrfrg(zipped_divide(stensor, Tiler_MN{}), ...)</code>（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/copy_atom.hpp#L226">copy_atom.hpp</a>）：它是怎样把本题的 <code>layout_tv</code> 作用到一个具体 tensor 上的？</li>
 <li>如果 thr 改成 <code>(32,4):(1,32)</code>（线程沿 M 排），<code>layout_tv</code> 会变成什么？每线程的 4 个值还连续吗？<code>test_make_layout_tv_matches_cute[colthr]</code> 里有答案。</li>
@@ -1053,13 +1256,22 @@ def same_function(f, g, domain) -&gt; bool:
 <a class="o2" href="#b1-1">题面速览</a>
 <a class="o2" href="#b1-2">直觉与类比</a>
 <a class="o2" href="#b1-3">图解：三个构造</a>
-<a class="o2" href="#b1-4">逐步演示</a>
-<a class="o2" href="#b1-5">易错点</a>
-<a class="o2" href="#b1-6">对照文档</a>
-<a class="o2" href="#b1-7">上机验证</a>
-<a class="o2" href="#b1-8">三级提示</a>
-<a class="o2" href="#b1-9">参考解</a>
-<a class="o2" href="#b1-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#b1-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#b1-5">图解详解：三个映射怎样由代数构造出来</a>
+<a class="o3" href="#b1-5-1">图 1 · Layout 就是函数：坐标 → 下标</a>
+<a class="o3" href="#b1-5-2">图 2 · local_tile_view ：zipped_divide 把下标重新分组，切片只剩一个偏移</a>
+<a class="o3" href="#b1-5-3">图 3 · raked_product ：正向表 (m, k) → t + 128·v</a>
+<a class="o3" href="#b1-5-4">图 4 · right_inverse ：把箭头倒过来（小例子）</a>
+<a class="o3" href="#b1-5-5">图 5 · tv_coord / owner ：真实尺寸的双向查表</a>
+<a class="o3" href="#b1-5-6">图 6 · smem_layout_map ：Swizzle ∘ Layout</a>
+<a class="o3" href="#b1-5-7">速查：代数构造 ↔ 手写公式</a>
+<a class="o2" href="#b1-6">逐步演示</a>
+<a class="o2" href="#b1-7">易错点</a>
+<a class="o2" href="#b1-8">对照文档</a>
+<a class="o2" href="#b1-9">上机验证</a>
+<a class="o2" href="#b1-10">三级提示</a>
+<a class="o2" href="#b1-11">参考解</a>
+<a class="o2" href="#b1-12">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

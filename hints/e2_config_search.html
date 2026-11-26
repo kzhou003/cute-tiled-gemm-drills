@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3 cur" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3 cur" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">E2 · Track E · 完整成熟的 Tiled GEMM · 55 分钟 · 中</div><h1>E2 · 选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</h1><p class="lede">CuTe 能告诉你一个配置合不合法、能生成它的代码，但不会替你选 tile、stage 数、warp group 安排和 swizzle。本题把 Hopper 上的硬约束（wgmma 形状、TMA box、SMEM 容量、寄存器）写成检查器，再写一个带 L2 复用、wave 量化和流水线延迟的代价模型，在 972 个配置里排序，并和 CUTLASS 常用的选择对照：模型能筛掉不合法的配置、指出趋势，最终选择仍然要实测。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/e2_config_search.py"><code>mine/e2_config_search.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_e2_config_search.py"><code>tests/test_e2_config_search.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/e2_config_search.py"><code>solutions/e2_config_search.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="E2"> 我已完成这道题</label></header>
 <h2 id="e2-1">题面速览</h2>
@@ -306,9 +318,229 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="e2-3">图解：一个配置的生死与快慢</h2>
 
 <figure class="flow"><div class="flow-head">Config → violations → estimate → 排名<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;Config → violations → estimate → 排名&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;cfg&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;Config&quot;, &quot;s&quot;: &quot;tile · stages · 调度&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;shp&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;形状约束&quot;, &quot;s&quot;: &quot;wgmma · swizzle · box&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;res&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;资源约束&quot;, &quot;s&quot;: &quot;smem · 寄存器 · stages&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;每个 k-tile&quot;, &quot;s&quot;: &quot;t_mma · t_load&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pl&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;流水线&quot;, &quot;s&quot;: &quot;延迟 / stages&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;wv&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;wave&quot;, &quot;s&quot;: &quot;ceil(tiles / 并发)&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;rk&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;排序&quot;, &quot;s&quot;: &quot;(total, config)&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;cfg&quot;, &quot;b&quot;: &quot;shp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;cfg&quot;, &quot;b&quot;: &quot;res&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;shp&quot;, &quot;b&quot;: &quot;kt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;res&quot;, &quot;b&quot;: &quot;pl&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;wv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;pl&quot;, &quot;b&quot;: &quot;wv&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;wv&quot;, &quot;b&quot;: &quot;rk&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 220.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 180.0}}"></div><figcaption>约束是硬的：违反一条就不参加排序。代价模型是软的：它只负责把明显差的配置排到后面，相近的配置之间的先后不可信。</figcaption></figure>
-<h2 id="e2-4">逐步演示</h2>
+<h2 id="e2-4">从小例子开始：先在草稿纸上手算</h2>
+<p>先别管 972 个配置。拿一个小问题、两三个配置，把每条约束、代价模型的每一项都在纸上代一遍数，搞清楚“一个配置怎样被判死刑、活下来的怎样被打分”；再放大到测试里的 4096³；然后看一个所有 tile 都能在一个 wave 里放下的边界情况；最后写成一般公式。</p>
+<p>① 小：M=N=512，K=1024，手算 3 个配置</p>
+<p>C 被 128×128 切成 4×4 = 16 个 tile，一个 wave 就装下了；每个 CTA 的 K 循环 16 轮。</p>
+<pre><code>A 128×128×64 s4 coop  5.274 µs
+B 同 A，stages=2      5.909 µs
+  （延迟藏不住）
+C 256×256×64 s2 coop  ✗ acc_regs
+  （256 + 40 &gt; 232）
+</code></pre>
+<p>② 中：测试的运行例子 4096³</p>
+<p>1024 个 tile，8 个 wave，L2 复用让每个 CTA 只需读 14% 的 panel。</p>
+<pre><code>128×128×64 s4 coop  159.887 µs  #42
+同上 pingpong       151.599 µs  #6
+64×256×64 s2 pp     151.589 µs  #0
+</code></pre>
+<p>③ 边界：一个 wave 装下全部 tile</p>
+<p>tiles ≤ 132 时 <code>t_load_k</code> 和 <code>t_epi</code> 与 tile 形状无关（见草稿纸第 5 步），只剩 MMA 时间：tile 越小，开的 SM 越多。</p>
+<pre><code>512×512×8192：
+64×64×64 s5 pp      18.709 µs  #0
+128×128×64 s4 coop  36.623 µs  #77
+</code></pre>
+<p>④ 一般</p>
+<p>约束是 8 个独立的不等式；代价是“每轮取最慢的一项 × 轮数 + 固定开销”，再乘 wave 数。</p>
+<pre><code>合法 ⇔ 8 条规则全满足
+step = max(t_mma, t_load,
+           (lat+t_load)/stages)
+total = waves · (lat + t_load
+         + 主循环 + t_epi)
+</code></pre>
+<p><strong>✎</strong> 草稿纸：H100，M=N=512，K=1024；配置 A = 128×128×64，stages=4，cooperative，128B swizzle</p>
+<pre><code class="language-text">0) 常量    sms = 132   SMEM 上限 232448 B   寄存器 65536/SM   HBM 3.35e6 B/µs   tensor 989e6 FLOP/µs   lat = 0.6 µs
+           每个 SM 的算力 = 989e6 / 132 = 7492424 FLOP/µs
+1) 形状约束（逐条，按顺序）
+   wgmma_m   cooperative：BM % 128 = 128 % 128 = 0                ✓   （两个 WG 各 64行）
+   wgmma_n   BN % 8 = 0 且 BN = 128 ≤ 256                         ✓
+   swizzle   BK·2 = 64·2 = 128 B，128 % 128 = 0                   ✓   （K-major 一行正好一个 SW128 atom 行）
+   tma_box   max(128, 128, 64) = 128 ≤ 256                        ✓
+2) 资源约束
+   smem      4·(128+128)·64·2 + 8192 + 4·16 = 131072 + 8192 + 64 = 139328 ≤ 232448 ✓
+   acc_regs  128·128 / 256 = 64；64 + 40 = 104 ≤ 232              ✓
+   regs      128·40 + 2·128·232 = 5120 + 59392 = 64512 ≤ 65536    ✓   （和配置无关，只看
+GPU）
+   stages    4 ≥ 2                                                ✓   → violations = []
+3) 网格与 wave
+   tiles_m = ceil(512/128) = 4   tiles_n = 4   tiles = 16   k_tiles = ceil(1024/64) = 16
+   W = min(16, 132) = 16（同时在跑的 CTA）   waves = ceil(16/132) = 1   wave_eff =
+16/132 = 0.1212
+4) L2 复用：16 个 tile 排成 4×4，全部同时在跑
+   distinct_m = ceil(16/4) = 4   distinct_n = min(16, 4) = 4
+   reuse = (4·128 + 4·128) / (16·(128+128)) = 1024 / 4096 = 0.25
+5) 一个 k-tile
+   t_mma_k  = 2·128·128·64 / 7492424 × 1.0      = 2097152 / 7492424 = 0.2799 µs
+   每 CTA 带宽 = 3.35e6 / 16 = 209375 B/µs
+   t_load_k = (128+128)·64·2 / 209375 × 0.25   = 0.1565 × 0.25     = 0.0391 µs
+              ↑ 其实 = (M+N)·BK·2 / HBM = 1024·128 / 3.35e6：只要一个 wave 装得下，就和
+BM、BN 无关
+   藏延迟   = (0.6 + 0.0391) / 4                                   = 0.1598 µs
+   step     = max(0.2799, 0.0391, 0.1598) = 0.2799                 ← MMA 受限
+   t_epi    = 128·128·2 / 209375 = 0.1565 µs   （= M·N·2 / HBM，同样和 tile 无关）
+6) cooperative 的一个 wave
+   t_wave = lat + t_load_k + k_tiles·step + t_epi = 0.6 + 0.0391 + 16·0.2799 + 0.1565 = 0.6 + 0.0391 + 4.4784 + 0.1565 = 5.2741
+   total  = 1 × 5.2741 = 5.274 µs     TFLOP/s = 2·512·512·1024 / 5.2741 / 1e6 = 101.8 B) 同 A，stages = 2
+   藏延迟 = 0.6391 / 2 = 0.3196 &gt; 0.2799   → step = 0.3196（延迟受限）
+   t_wave = 0.6 + 0.0391 + 16·0.3196 + 0.1565 = 5.9086 µs              → 慢 12%，90.9 TFLOP/s
+A') 同 A，换成 pingpong
+   acc_regs = 128·128 / 128 = 128；128 + 40 = 168 ≤ 232 ✓          waves = ceil(16 / 264) = 1
+   t_wave = max(2·16·0.2799, 16·0.2799) + 0.6 + 0.0391 + 0.1565 = 8.9569 + 0.7956 = 9.7525 µs
+   ← 模型让两个 tile 挤在同一个 SM 上轮流用 tensor core，116 个 SM 却闲着：小问题上 pingpong反而慢
+C) 256×256×64，stages=2，cooperative
+   smem = 2·512·64·2 + 8192 + 32 = 139296 ✓；acc = 256·256/256 = 256，256 + 40 = 296 &gt; 232   → ['acc_regs']
+D) 64×128×64 cooperative：64 % 128 ≠ 0                         → ['wgmma_m']（pingpong
+就合法）
+E) 128×128×32，128B swizzle：BK·2 = 64 B，64 % 128 ≠ 0        → ['swizzle']（换 64B
+swizzle 就合法）
+F) 128×128×64，stages=7：7·32768 + 8192 + 112 = 237680 &gt; 232448 → ['smem']
+7) 全搜索（972 个配置）：357 个合法；第 0 名 64×64×64 s5 pingpong 3.035 µs，
+   和 128×64×64 s5 cooperative 完全并列（按 BM 升序打破平局）；A 排在第 77 名。
+</code></pre>
+<p>下面这张图就是“配置构造器”：随便拼一个配置，左边逐条检查 8 条规则（顺序和 <code>violations</code> 一致），右边是 SMEM 和寄存器的预算条，底部是一个 wave 的时间分解。下方面板打印 <code>violations</code> 、<code>smem_bytes</code> 、<code>acc_regs_per_thread</code> 和<code>estimate</code> 每一步代入后的数。先点“配置预设”里的 A–F 对照上面的草稿纸，再自己改。BM / BN 里的 192、512，BK 里的 256、512 和 stages = 1、8 不在 <code>default_space</code> 里，是为了让你看到每条规则失败的样子。</p>
 
-<div class="stepper"><div class="st-head"><span class="st-title">▶ 4096³ 上的 128×128×64、stages = 4：从合法性到 159.9 µs</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;smem&quot;, &quot;s&quot;: &quot;139328 B&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ar&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;acc_regs&quot;, &quot;s&quot;: &quot;64 / 线程&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;k-tile&quot;, &quot;s&quot;: &quot;t_mma 0.2799&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;8 waves&quot;, &quot;s&quot;: &quot;eff 0.970&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pp&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;pingpong&quot;, &quot;s&quot;: &quot;151.6 µs&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;2 stages&quot;, &quot;s&quot;: &quot;216.5 µs&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;ar&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ar&quot;, &quot;b&quot;: &quot;kt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;pp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;s2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="sm"><div class="step-title">1. SMEM</div><p><code>4 × (128 + 128) × 64 × 2 + 8192 + 4 × 16 = 139328</code> 字节 &lt; 232448。按同样的公式，同一个 tile 最多能放 <code>(232448 − 8192) / (32768 + 16) = 6</code> 个 stage；7 个 stage 是 237680 字节，违反 <code>smem</code>。</p>
+<figure class="flow snap"><div class="flow-head">配置构造器 · 8 条约束 + 预算条 + 一个 wave 的时间</div><img src="../figs/e2/e2_new-01.png" alt="配置构造器 · 8 条约束 + 预算条 + 一个 wave 的时间" loading="lazy" style="width:100%;aspect-ratio:1461/1775"></figure>
+<h2 id="e2-5">图解详解：约束、代价与排序</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>上面的构造器把所有东西放在一张图里。这一节把它拆开，一张图只讲一件事：SMEM 决定 stage 数的上限、wgmma 形状和累加器决定 tile 和 schedule 能不能配、tile 网格决定 wave 数和 L2 复用、stage 数决定延迟能不能藏住，最后是 972 个配置的排名和每一项代价的占比。每张图下方的面板都会把当前状态代入公式算给你看。</p>
+<p>整道题的骨架就是下面这段代码，后面的五张图依次对应其中一部分：</p>
+<pre><code>space = default_space()                             # 3·3·3·6·2·3 = 972 个配置
+legal = [c for c in space if not violations(c, gpu)]  # 图 1（smem / stages）、图 2（wgmma_m
+for c in legal:
+    e = estimate(c, gpu, M, N, K)                   # 图 3（tiles / waves / reuse）、图 4（s
+ranked = sorted(..., key=lambda ce: (ce[1][&quot;total&quot;], ce[0]))   # 图 5（排名 + 代价分解）
+</code></pre>
+<h3 id="e2-5-1">图 1 · SMEM 预算：<code>smem_bytes</code> 和最多几个 stage</h3>
+<p>每个 stage 放一块 A（BM×BK）和一块 B（BN×BK），外加两个 8 字节的 mbarrier；epilogue 固定占 8192 字节。柱子按 stages = 1…8 画出来，红色虚线是 232448 字节的上限。看三件事：① 柱子的增长是线性的，每多一个 stage 多</p>
+<p><code>(BM+BN)·BK·2 + 16</code> 字节；② 128×128×64 最多 6 个 stage，256×256×64 只能 3 个；③ stages = 1 永远违反 <code>stages</code> ，8 不在搜索空间里。</p>
+
+<figure class="flow snap"><div class="flow-head">SMEM 随 stage 数增长</div><img src="../figs/e2/e2_new-02.png" alt="SMEM 随 stage 数增长" loading="lazy" style="width:100%;aspect-ratio:1461/1187"></figure>
+<p>本题的 <code>smem</code> 规则就是把 CUTLASS 的除法反过来写成不等式：</p>
+<p><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl#L68-L86">compute_stage_count_or_override(StageCountAutoCarveout)</a> 先把 stage 字节数按 128 对齐、加上 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L298-L301">PipelineTmaAsync::SharedStorage</a> （一个 full、一个 empty mbarrier，共 16 字节），再用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_common.inl#L57">sm90_smem_capacity_bytes</a> 减 carveout 去除。</p>
+<h3 id="e2-5-2">图 2 · wgmma 形状与累加器：<code>wgmma_m</code> 、<code>acc_regs</code> 、<code>regs</code></h3>
+<p>wgmma 一条指令让一个 warp group（128 线程）算 64 行。左边把 tile 按 64 行一条切开，并涂上负责它的 WG 的颜色。cooperative：两个 WG 平分一个 tile，WG1 拿上半 BM/2 行，WG2 拿下半；BM = 64 或 192 时分界线会落在一条 64 行的中间（红色斜线），所以要求 BM % 128 = 0。pingpong：每个 WG 拿一个完整的 tile（画成两个 tile），BM % 64 = 0 即可，但每个线程的累加器多一倍。右边两张表把 3×3（加上 192）个 tile 的 <code>acc + 40</code> 全部列出来，超过 232 的是红色。</p>
+
+<figure class="flow snap"><div class="flow-head">谁算哪几行、每个线程要多少寄存器</div><img src="../figs/e2/e2_new-03.png" alt="谁算哪几行、每个线程要多少寄存器" loading="lazy" style="width:100%;aspect-ratio:1461/1243"></figure>
+<p>真实的 CUTLASS 里，cooperative kernel 用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L373-L375">static_assert(size&lt;0&gt;(TileShape{}) &gt;= 128)</a> 检查 M 方向（只要求 ≥128，本题简化成 BM % 128 = 0），两个 WG 沿 M 平分 tile；寄存器重新分配用的是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L150-L151">LoadRegisterRequirement / MmaRegisterRequirement</a> ，在 producer 分支里 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L562">warpgroup_reg_dealloc&lt;40&gt;</a> 、consumer 分支里</p>
+<p><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L772">warpgroup_reg_alloc&lt;232&gt;</a> 。wgmma 的形状表见 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions">Asynchronous Warpgroup Level Matrix Multiply-</a></p>
+<p><a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions">Accumulate</a>。swizzle 规则对应 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cute/atom/mma_traits_sm90_gmma.hpp#L82-L84">Layout_K_SW32/64/128_Atom_Bits</a> ：一行是 256 / 512 / 1024 位，即 32 / 64 / 128 字节；<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_common.inl#L245-L254">ss_smem_selector 的 K-major 分支</a> 按 BK 从 SW128 往下选第一个能整除的。</p>
+<h3 id="e2-5-3">图 3 · tile 网格、wave 量化与 L2 复用</h3>
+<p>C 被切成 <code>tiles_m × tiles_n</code> 个 tile，按行主序编号，每 132 个（pingpong 是 264 个）组成一个 wave，格子的颜色和数字就是 wave 号。粗框是模型里“同时在跑”的 W = min(tiles, 132) 个 tile：它们一共只用到左边橙色的 <code>distinct_m</code> 条 A panel 和上边紫色的 <code>distinct_n</code> 条 B panel，只有这些需要从 HBM 读，这就是 <code>reuse</code> 。试试：4096×4096 用 128×128 是 8 个 wave、最后一个只有 100 个 tile；M = N = 512 时整个 C 一个 wave 就装下了，132 个 SM 里大半在闲着。</p>
+
+<figure class="flow snap"><div class="flow-head">C 的 tile 网格：wave 编号与第一个 wave 用到的 panel</div><img src="../figs/e2/e2_new-04.png" alt="C 的 tile 网格：wave 编号与第一个 wave 用到的 panel" loading="lazy" style="width:100%;aspect-ratio:1461/1571"></figure>
+<p>试一下 <code>N = 128</code> 、<code>M = 4096</code> 、BM = BN = 128：只有一列 tile，<code>distinct_n = 1</code> ，但 32 条 A panel 全都不同，reuse = (32·128 + 128) / (32·256) ≈ 0.52，远比方阵的 0.14 差，这就是测试 <code>test_l2_reuse_lowers_load_time</code> 想说明的事。真实 kernel 里 tile 的发射顺序由 tile scheduler 决定（例如 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_tile_scheduler.hpp">sm90_tile_scheduler.hpp</a> 的 swizzle / raster 选项），复用并不是公式里的常数。</p>
+<h3 id="e2-5-4">图 4 · 一个 k-tile 的 step、stage 数与一个 wave 的时间</h3>
+<p>上半部分：横轴是 stage 数，三条线分别是 <code>t_mma_k</code> （和 stage 无关）、<code>t_load_k</code> （和 stage 无关）和 <code>(lat + t_load_k) / stages</code> （随 stage 下降的双曲线）；灰色柱子是 <code>step</code> = 三者中最大的。曲线落到 <code>t_mma_k</code> 以下之后，再加 stage 没有任何收益。下半部分用同一个配置画出 cooperative 和 pingpong 的一个 wave：pingpong 把两个 tile 的 MMA 串起来（<code>2·k_tiles·t_mma_k</code> ），换来一半的 wave 数和被藏住的 epilogue。</p>
+
+<figure class="flow snap"><div class="flow-head">step = max(t_mma, t_load, (lat + t_load) / stages)</div><img src="../figs/e2/e2_new-05.png" alt="step = max(t_mma, t_load, (lat + t_load) / stages)" loading="lazy" style="width:100%;aspect-ratio:1461/1312"></figure>
+<p>stage 数在真实 kernel 里就是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L289">PipelineTmaAsync</a> 的环形 buffer 长度：producer 最多可以领先 consumer <code>stages</code> 个 k-tile 发 TMA。cooperative 和 pingpong 两种设计的文字说明见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/efficient_gemm.md#L231-L250">efficient_gemm.md 的 warp-specialized 一节</a>，流水线的 producer / consumer 协议见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/pipeline.md">pipeline.md</a> 。</p>
+<h3 id="e2-5-5">图 5 · 搜索：972 个配置的排名与代价分解</h3>
+<p>每一行是一个合法配置（或者一组 total 完全相同、只差 stage 数的配置），条的长度是 <code>total</code> ，拆成三段：<code>waves·</code>主循环、<code>waves·(lat + t_load)</code> 、<code>waves·t_epi</code> 。左边的数字是 <code>search</code> 返回列表里的下标（从 0 开始，和测试一致）。★ 是 CUTLASS 常用的三个配置。切换问题看排名怎么变：4096³ 上大 tile、pingpong 领先；512×512 上小 tile 领先，因为一个 wave 就装下所有 tile，只有每个 tile 的 MMA 时间重要。右下角是 972 个配置里每条规则被违反的次数（和问题无关）。</p>
+
+<figure class="flow snap"><div class="flow-head">search(default_space(), H100, M, N, K) 的前几名</div><img src="../figs/e2/e2_new-06.png" alt="search(default_space(), H100, M, N, K) 的前几名" loading="lazy" style="width:100%;aspect-ratio:1461/1625"></figure>
+<p>真实系统里这一步是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/profiler.md">CUTLASS Profiler</a> ：它把实例化好的 kernel 在目标形状上逐个实测。本题的 <code>search</code> 只做到“剪枝 + 粗排”，前 k 名仍然要交给 profiler。</p>
+<h3 id="e2-5-6">速查</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>量</th>
+<th>公式</th>
+<th>4096³、128×128×64 s4 coop</th>
+<th>512²×1024、同一配置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>smem_bytes</code></td>
+<td><code>stages·(BM+BN)·BK·2 + 8192 + stages·16</code></td>
+<td>139328</td>
+<td>139328</td>
+</tr>
+<tr>
+<td><code>acc_regs_per_thread</code></td>
+<td>coop <code>BM·BN/256</code> ，pp <code>BM·BN/128</code></td>
+<td>64</td>
+<td>64</td>
+</tr>
+<tr>
+<td>最多几个 stage</td>
+<td><code>floor((232448 − 8192) / ((BM+BN)·BK·2 + 16))</code></td>
+<td>6</td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>tiles</code> 、<code>k_tiles</code></td>
+<td><code>ceil(M/BM)·ceil(N/BN)</code> 、<code>ceil(K/BK)</code></td>
+<td>1024、64</td>
+<td>16、16</td>
+</tr>
+<tr>
+<td><code>W</code> 、<code>distinct_m</code> 、<code>distinct_n</code></td>
+<td><code>min(tiles, sms)</code> 、<code>ceil(W/tiles_n)</code> 、<code>min(W, tiles_n)</code></td>
+<td>132、5、32</td>
+<td>16、4、4</td>
+</tr>
+<tr>
+<td><code>reuse</code></td>
+<td><code>(dm·BM + dn·BN) / (W·(BM+BN))</code></td>
+<td>0.1402</td>
+<td>0.25</td>
+</tr>
+<tr>
+<td><code>t_mma_k</code></td>
+<td><code>2·BM·BN·BK / (flops/sms) · SWIZZLE_MMA_FACTOR</code></td>
+<td>0.2799</td>
+<td>0.2799</td>
+</tr>
+<tr>
+<td><code>t_load_k</code></td>
+<td><code>(BM+BN)·BK·2 / (hbm/W) · reuse</code></td>
+<td>0.1810</td>
+<td>0.0391</td>
+</tr>
+<tr>
+<td><code>step</code></td>
+<td><code>max(t_mma_k, t_load_k, (lat + t_load_k)/stages)</code></td>
+<td>0.2799</td>
+<td>0.2799</td>
+</tr>
+<tr>
+<td><code>t_epi</code></td>
+<td><code>BM·BN·2 / (hbm/W)</code></td>
+<td>1.2911</td>
+<td>0.1565</td>
+</tr>
+<tr>
+<td><code>waves</code></td>
+<td>coop <code>ceil(tiles/sms)</code> ，pp <code>ceil(tiles/(2·sms))</code></td>
+<td>8</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>t_wave</code></td>
+<td>coop <code>lat + t_load + k_tiles·step + t_epi</code> ；pp <code>max(2·k_tiles·t_mma, k_tiles·step) + lat + t_load + t_epi</code></td>
+<td>19.9859</td>
+<td>5.2741</td>
+</tr>
+<tr>
+<td><code>total</code> 、TFLOP/s</td>
+<td><code>waves·t_wave</code> 、<code>2·M·N·K / total / 1e6</code></td>
+<td>159.887、859.6</td>
+<td>5.274、101.8</td>
+</tr>
+<tr>
+<td><code>wave_eff</code></td>
+<td><code>tiles / (waves·sms·(2 if pp else 1))</code></td>
+<td>0.9697</td>
+<td>0.1212</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="e2-6">逐步演示</h2>
+
+<div class="stepper"><div class="st-head"><span class="st-title">▶ 4096³ 上的 128×128×64、stages = 4：从合法性到 159.9 µs</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;sm&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;smem&quot;, &quot;s&quot;: &quot;139328 B&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;ar&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;acc_regs&quot;, &quot;s&quot;: &quot;64 / 线程&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;kt&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;k-tile&quot;, &quot;s&quot;: &quot;t_mma 0.2799&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;w&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;8 waves&quot;, &quot;s&quot;: &quot;eff 0.970&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pp&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;pingpong&quot;, &quot;s&quot;: &quot;151.6 µs&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;2 stages&quot;, &quot;s&quot;: &quot;216.5 µs&quot;, &quot;k&quot;: &quot;todo&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;sm&quot;, &quot;b&quot;: &quot;ar&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;ar&quot;, &quot;b&quot;: &quot;kt&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;w&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;w&quot;, &quot;b&quot;: &quot;pp&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;kt&quot;, &quot;b&quot;: &quot;s2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: true}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 180.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 150.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="sm"><div class="step-title">1. SMEM</div><p><code>4 × (128 + 128) × 64 × 2 + 8192 + 4 × 16 = 139328</code> 字节 &lt; 232448。按同样的公式，同一个 tile 最多能放 <code>(232448 − 8192) / (32768 + 16) = 6</code> 个 stage；本模型里 7 个 stage 是 237680 字节（7·32768 + 8192 + 7·16），违反 <code>smem</code>。</p>
 </div><div class="step" data-hl="sm,ar"><div class="step-title">2. 寄存器</div><p>cooperative 每个 MMA 线程持有 128·128 / 256 = 64 个 FP32 累加器，加上 40 个其他寄存器 = 104 ≤ 232。256×256 cooperative 要 256 个，违反 <code>acc_regs</code>；256×128 cooperative 正好 128 + 40 = 168，合法，但同一个 tile 换成 pingpong 就是 256，不合法。</p>
 </div><div class="step" data-hl="ar,kt"><div class="step-title">3. 一个 k-tile</div><p><code>t_mma_k = 2·128·128·64 / (989e6 / 132) = 0.2799</code> µs。1024 个 tile、每 wave 132 个，同一个 wave 里只有 <code>ceil(132/32) = 5</code> 个不同的 A panel 和 32 个不同的 B panel，复用系数 <code>(5·128 + 32·128) / (132·256) = 0.140</code>，<code>t_load_k = 0.181</code> µs（每个 CTA 只分到 1/132 的 HBM 带宽）。<code>step = max(0.2799, 0.181, (0.6 + 0.181)/4 = 0.195) = 0.2799</code>：计算受限。</p>
 </div><div class="step" data-hl="kt,s2"><div class="step-title">4. stage 太少</div><p>同一个 tile 只给 2 个 stage：<code>(0.6 + 0.181) / 2 = 0.3905</code>，超过了 <code>t_mma_k</code>，step 变成 0.3905，总时间从 159.9 涨到 216.5 µs。这就是 D2、E1 里看到的“延迟藏不住”。</p>
@@ -316,7 +548,7 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 </div><div class="step" data-hl="w,pp"><div class="step-title">6. 换成 pingpong</div><p>每个 SM 同时处理两个 tile，wave 数降到 4，但两个 WG 共用 tensor core：<code>t_wave = max(2·64·0.2799, 64·0.2799) + …</code>，总时间 151.6 µs，比 cooperative 快 5%：多出来的是 epilogue 和 load 尾巴被另一个 WG 的 MMA 藏住了。这和 D3 的结论一致：epilogue 不超过 MMA 的两倍时 pingpong 不慢。</p>
 </div></div></div>
 <p>在整个默认搜索空间（972 个配置，合法 357 个）里，模型的第一名是 <code>64×256×64、pingpong、2 stages</code>（906.7 TFLOP/s，前几名并列，只有 stage 数不同）。常见的 CUTLASS 选择 <code>128×128×64 cooperative 4 stages</code> 排第 43，<code>128×256×64 cooperative</code> 排第 36，<code>64×128×64 pingpong</code> 排第 19。模型认为它们差距不大，排名对这些细节非常敏感：这正是“最后一步要实测”的原因。</p>
-<h2 id="e2-5">易错点</h2>
+<h2 id="e2-7">易错点</h2>
 <ul>
 <li><strong>cooperative 只要求 BM % 64。</strong> 两个 WG 各 64 行起步，BM 必须是 128 的倍数。测试 <code>test_violations</code> 里 64×128 cooperative 报 <code>wgmma_m</code>、pingpong 合法。</li>
 <li><strong>只返回第一个违反的规则。</strong> 128×128×512 同时违反 <code>tma_box</code> 和 <code>smem</code>，测试要求两个都报、按固定顺序。</li>
@@ -325,12 +557,62 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>swizzle 只当合法性检查。</strong> 窄 swizzle 合法但慢（MMA 读 SMEM 有 bank 冲突），不乘系数时 32B swizzle 会和 128B 并列，排序变得没有意义。测试 <code>test_narrow_swizzle_slows_mma</code>。</li>
 <li><strong>排序不稳定。</strong> 很多配置的 total 完全相同（pingpong 在计算受限时与 stage 数无关），只按 total 排序时结果依赖输入顺序。测试 <code>test_search_breaks_ties_by_config_fields</code>。</li>
 </ul>
-<h2 id="e2-6">对照文档</h2>
+<h2 id="e2-8">对照文档</h2>
 <blockquote>
 <p>“不要误解为：CuTe 会自动搜索所有 CTA tile、warp 数、pipeline stage、swizzle 和 scheduler 参数，并保证找到全局最优 kernel。它提供的是可组合的表达、静态推导、合法性检查和代码生成路径；性能搜索通常还需要人工设计搜索空间、autotuning 和实机 profiling。”</p>
 </blockquote>
 <p>本题把这句话拆成三步：<code>violations</code> 是“合法性检查”（C2 的 CUTLASS 层），<code>estimate</code> 是“代价模型”（排除明显差的），<code>search</code> 是“搜索空间”。缺的那一步是实机 profiling：模型里 64×256 pingpong 和 128×128 pingpong 只差 0.01 µs，真实 GPU 上谁快取决于模型没写进去的东西（L2 命中率的细节、指令发射、epilogue 和 TMA store 的争用）。</p>
-<h2 id="e2-7">上机验证</h2>
+<h2 id="e2-9">真实代码</h2>
+<p>简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl#L66-L86">compute_stage_count_or_override</a> ：</p>
+<pre><code>template&lt;int capacity_bytes_, class ElementA, class ElementB, class TileShapeMNK, int alig
+constexpr int compute_stage_count_or_override(StageCountAutoCarveout&lt;carveout_bytes_&gt;) {
+  constexpr auto mainloop_pipeline_bytes = sizeof(typename cutlass::PipelineTmaAsync&lt;1&gt;::S
+  constexpr int stage_bytes_ = bits_to_bytes(a_bits * BM * BK) + bits_to_bytes(b_bits * BN
+  constexpr int stage_bytes  = round_up(stage_bytes_, alignment) + mainloop_pipeline_bytes
+  return (capacity_bytes - round_up(carveout_bytes_, alignment)) / stage_bytes;
+}
+</code></pre>
+<p>本题的 <code>smem_bytes</code> 就是把这个除法反过来：<code>stages·(BM + BN)·BK·2 + EPI_SMEM + stages·16</code> ，<code>BARRIER_SMEM_PER_STAGE = 16</code> 是 <code>PipelineTmaAsync&lt;1&gt;::SharedStorage</code> 的两个 8 字节 mbarrier。example 49 里 carveout 传的是 <code>sizeof(CollectiveEpilogue::SharedStorage)</code> （<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/49_hopper_gemm_with_collective_builder/49_collective_builder.cu#L325">49_collective_builder.cu</a> ），本题用固定的 <code>EPI_SMEM = 8192</code> 代替。</p>
+<p>寄存器分配简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L150-L151">cooperative kernel</a> （pingpong 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L147-L148">同名常量</a> 也是 40 / 232）：</p>
+<pre><code>static constexpr uint32_t LoadRegisterRequirement = !HeavyRegisterPressure ? 40 : 24;
+static constexpr uint32_t MmaRegisterRequirement  = !HeavyRegisterPressure ? 232 : 240;
+// 128·40 + 2·128·232 = 64512 ≤ 65536：本题的 &quot;regs&quot; 规则
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>本题的规则 / 模型</th>
+<th>真实系统</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wgmma_m</code> 、<code>wgmma_n</code></td>
+<td>builder 里对 tile shape 的 <code>static_assert</code> ；wgmma 的 M = 64、N 是 8 的倍数且≤ 256</td>
+</tr>
+<tr>
+<td><code>swizzle</code> 、<code>tma_box</code></td>
+<td><a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_common.inl#L273">ss_smem_selector</a> 按 BK 的字节数选 SW128 / SW64 / SW32；TMA box 每维 ≤256</td>
+</tr>
+<tr>
+<td><code>smem</code> 、<code>stages</code></td>
+<td><code>compute_stage_count_or_override</code></td>
+</tr>
+<tr>
+<td><code>acc_regs</code> 、<code>regs</code></td>
+<td><code>MmaRegisterRequirement</code> ；超出时编译器 spill，<code>ptxas -v</code> 能看到</td>
+</tr>
+<tr>
+<td><code>SWIZZLE_MMA_FACTOR</code></td>
+<td>没有对应的公式，只能实测</td>
+</tr>
+<tr>
+<td><code>estimate</code> 、<code>search</code></td>
+<td>CUTLASS Profiler（<code>cutlass_profiler --operation=gemm …</code> ）或 cuBLASLt heuristics + 实测</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="e2-10">上机验证</h2>
 <pre><code class="language-bash">DRILL_IMPL=solutions python3 -c &quot;
 from drill import load
 m = load('e2_config_search')
@@ -338,7 +620,7 @@ r = m.search(m.default_space(), m.H100_SXM, 4096, 4096, 4096)
 for c, e in r[:5]: print(c, round(e['total'], 2), round(e['tflops'], 1))&quot;
 </code></pre>
 <p><code>H100_SXM</code> 是示例规格（132 个 SM、每 CTA 最多 232448 字节 SMEM、3.35 TB/s、989 TFLOP/s dense FP16）。真机上可以用 CUTLASS profiler（<code>cutlass_profiler --operation=gemm --m=4096 --n=4096 --k=4096</code>）对同样的候选测时间，看模型的排名和实测差多少（本机没有 GPU，未运行）。RTX 5090 的规格完全不同（170 个 SM、每 SM 128 KB 级的 SMEM、没有 WGMMA），要换一套 <code>GPU(...)</code> 参数和约束才有意义。</p>
-<h2 id="e2-8">三级提示</h2>
+<h2 id="e2-11">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">violations(Config(128, 128, 512, 2), H100_SXM)       # ['tma_box', 'smem']
 violations(Config(256, 256, 64, 2), H100_SXM)        # ['acc_regs']
@@ -372,7 +654,7 @@ search(default_space(), H100_SXM, 512, 512, 8192)[0][0]        # 64×64×64, sta
 <li>只有 (512/BM)·(512/BN) 个 tile：大 tile 只能开很少几个 CTA，大部分 SM 空着（wave 效率极低）。小 tile 让 64 个 CTA 同时跑。真实世界还会用 split-K / stream-K 把 K 方向也切开，让更多 SM 参与，最后再归约。</li>
 </ol>
 </div></details></div></details>
-<h2 id="e2-9">参考解</h2>
+<h2 id="e2-12">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/e2_config_search.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/e2_config_search.py</span><span class="muted small">177 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;E2 · 选配置：CTA tile、stage 数、warp group 安排与 swizzle，在硬件约束下用代价模型排序 —reference solution.
 
@@ -551,7 +833,7 @@ def default_space() -&gt; list:
             for bm, bn, bk, st, sch, sw in itertools.product(
                 [64, 128, 256], [64, 128, 256], [32, 64, 128], [2, 3, 4, 5, 6, 7],
                 [&quot;cooperative&quot;, &quot;pingpong&quot;], [32, 64, 128])]</code></pre></div></div></details>
-<h2 id="e2-10">面试官追问 &amp; 对照源码</h2>
+<h2 id="e2-13">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>CUTLASS 的 <code>StageCountAutoCarveout</code> 怎样从 SMEM 容量算出 stage 数（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl">sm90_gmma_builder.inl</a>）？它和本题的 <code>smem_bytes</code> 有什么不同？</li>
 <li>本模型没有 cluster：2×1 的 cluster 加 TMA multicast 能把 A 或 B 的 HBM 读取减半。把它加进模型，排名会怎样变？</li>
@@ -559,19 +841,28 @@ def default_space() -&gt; list:
 <li>如果要做一个 autotuner：先用 C2 的 <code>check_config</code> 和本题的 <code>violations</code> 过滤，再用 <code>estimate</code> 取前 N 个去实测。N 取多少合适？依据是什么？</li>
 </ul>
 
-<nav class="pager"><a href="e1_full_gemm.html">← 上一题 E1</a><span></span></nav>
+<nav class="pager"><a href="e1_full_gemm.html">← 上一题 E1</a><a href="f1_simt_cute_gemm.html">F1 下一题 →</a></nav>
 </main>
 <aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
 <a class="o2" href="#e2-1">题面速览</a>
 <a class="o2" href="#e2-2">直觉与类比</a>
 <a class="o2" href="#e2-3">图解：一个配置的生死与快慢</a>
-<a class="o2" href="#e2-4">逐步演示</a>
-<a class="o2" href="#e2-5">易错点</a>
-<a class="o2" href="#e2-6">对照文档</a>
-<a class="o2" href="#e2-7">上机验证</a>
-<a class="o2" href="#e2-8">三级提示</a>
-<a class="o2" href="#e2-9">参考解</a>
-<a class="o2" href="#e2-10">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#e2-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o2" href="#e2-5">图解详解：约束、代价与排序</a>
+<a class="o3" href="#e2-5-1">图 1 · SMEM 预算：smem_bytes 和最多几个 stage</a>
+<a class="o3" href="#e2-5-2">图 2 · wgmma 形状与累加器：wgmma_m 、acc_regs 、regs</a>
+<a class="o3" href="#e2-5-3">图 3 · tile 网格、wave 量化与 L2 复用</a>
+<a class="o3" href="#e2-5-4">图 4 · 一个 k-tile 的 step、stage 数与一个 wave 的时间</a>
+<a class="o3" href="#e2-5-5">图 5 · 搜索：972 个配置的排名与代价分解</a>
+<a class="o3" href="#e2-5-6">速查</a>
+<a class="o2" href="#e2-6">逐步演示</a>
+<a class="o2" href="#e2-7">易错点</a>
+<a class="o2" href="#e2-8">对照文档</a>
+<a class="o2" href="#e2-9">真实代码</a>
+<a class="o2" href="#e2-10">上机验证</a>
+<a class="o2" href="#e2-11">三级提示</a>
+<a class="o2" href="#e2-12">参考解</a>
+<a class="o2" href="#e2-13">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

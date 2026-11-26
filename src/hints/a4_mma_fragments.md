@@ -44,6 +44,201 @@ e w -> tile
 cap: 真实 CuTe 的 `thr_layout_vmnk` 是 `(_32,_2,_2,_1):(_1,_32,_64,_0)`：lane 最快，然后是 M 方向的 warp，再是 N 方向的 warp。`v = fv + 4r` 里的 r 是 `Tile<32,32,16>` 带来的 N 方向重复。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+先别管 128 个线程和 32×32 的 tile。拿几个 lane 手算一遍：只用 `g = lane >> 2` 、`q = lane % 4` 两个数，把它的 C、A、B 元素一个个写出来。规律清楚后，再把同样的计算铺满一个 atom（32 个 lane），最后扩展到 2×2 个 warp 的 tile。你自己推这道题时，草稿纸上也应该是这三步。
+
+① 小：lane 0、1、4、5 的 C fragment 只用 g、q 两个数。C 是 16×8，每个 lane 持有 4 个 float。
+
+```
+lane (g,q)  c0    c1    c2    c3
+ 0   (0,0)  (0,0) (0,1) (8,0) (8,1)
+ 1   (0,1)  (0,2) (0,3) (8,2) (8,3)
+ 4   (1,0)  (1,0) (1,1) (9,0) (9,1)
+ 5   (1,1)  (1,2) (1,3) (9,2) (9,3)
+```
+
+② 一个 atom：lane 5 的 A / B / C 全部值
+
+测试 `test_ptx_rules_known_entries` 检查的就是 lane 5。
+
+```
+A: (1,2) (1,3) (9,2) (9,3)
+   (1,10)(1,11)(9,10)(9,11)
+B: (1,2) (1,3) (1,10)(1,11)  (n,k)
+C: (1,2) (1,3) (9,2) (9,3)
+atom_tv("A")[5+32·2] = 9+16·2 = 41
+```
+
+③ 2×2 warp：线程 37
+
+lane 5，wm = 1，wn = 0。atom 坐标平移，N 方向重复一次（r = 0, 1）。
+
+```
+r=0（行 +16）：
+  (17,2) (17,3) (25,2) (25,3)
+r=1（列再 +16）：
+  (17,18)(17,19)(25,18)(25,19)
+holders("C", 5, 7) = [(23, 1)]
+```
+
+④ 一般把 ①–③ 里反复出现的模式写成公式。
+
+```
+g = lane>>2   q = lane%4
+C: (g + 8·(i>>1), 2q + (i&1))
+tile: m += 16·wm
+      n += 8·(wn + 2r), v = fv + 4r
+TV 一维下标 = t + T·v
+```
+
+**✎** 草稿纸：从 lane 号到 fragment 坐标
+
+```text
+1) 先拆 lane：g = lane >> 2（第几组，0..7），q = lane % 4（组里第几个，0..3）；反过来 lane = 4g + q
+       lane   0  1  2  3 | 4  5  6  7 | ... | 28 29 30 31
+       g      0  0  0  0 | 1  1  1  1 | ... |  7  7  7  7
+       q      0  1  2  3 | 0  1  2  3 | ... |  0  1  2  3
+   → 同一组 4 个 lane 的 g 相同：组号决定“行”，组内编号决定“哪两列”
+2) C（16×8，c0..c3）：row = g + 8·(i>>1)，col = 2q + (i&1)。lane 5：g = 1，q = 1
+       i=0: row = 1 + 8·0 = 1   col = 2 + 0 = 2   → (1,2)
+       i=1: row = 1 + 8·0 = 1   col = 2 + 1 = 3   → (1,3)
+       i=2: row = 1 + 8·1 = 9   col = 2 + 0 = 2   → (9,2)
+       i=3: row = 1 + 8·1 = 9   col = 2 + 1 = 3   → (9,3)
+   → 每个 lane 拿两行（g 和 g+8）× 两列（2q 和 2q+1）的 2×2 小块；32 个 lane × 4 = 128 =
+16×8 ✓
+3) A（16×16，a0..a7）：row = g + 8·((i>>1)&1)，col = 2q + (i&1) + 8·(i>>2)。lane 5
+       i     0      1      2      3      4       5       6       7
+       row   1      1      9      9      1       1       9       9
+       col   2      3      2      3      10      11      10      11
+   → 和 C 一样的 2×2 小块，只是 K 有 16 列，所以 i = 4..7 再向右平移 8 列
+   → 寄存器：{a0,a1} 是一个 32 位寄存器（同一行、相邻两个 k），共 4 个 32 位寄存器
+4) B（N×K = 8×16，b0..b3，用 (n,k)）：n = g，k = 2q + (i&1) + 8·(i>>1)。lane 5
+       i=0: (1,2)   i=1: (1,3)   i=2: (1,10)   i=3: (1,11)
+   → B 每个 lane 只有一个 n（= g），沿 K 拿两对；2 个 32 位寄存器
+5) atom 的列主序偏移（atom_tv 的值）：A = m + 16k，B = n + 8k，C = m + 16n
+       A lane 5：(1,2)→33  (1,3)→49  (9,2)→41  (9,3)→57  (1,10)→161 (1,11)→177
+(9,10)→169 (9,11)→185
+       放在一维下标 t + 32·v：atom_tv("A")[5 + 32·2] = atom_tv("A")[69] = 41
+       对照 CuTe：ALayout(5, 2) = 32·q + 1·g + 16·v0 + 8·v1 + 128·v2 = 32 + 1 + 0 + 8 + 0 = 41 ✓
+6) 2×2 warp：线程 37 → lane = 37 % 32 = 5，wm = (37 // 32) % 2 = 1，wn = 37 // 64 = 0
+       C：v = fv + 4r。fv=0..3 是 atom 的 c0..c3，r=0..1 是 N 方向的重复
+       r=0： (1+16, 2+8·(0+0)) = (17,2)  (17,3)  (25,2)  (25,3)
+       r=1： (1+16, 2+8·(0+2)) = (17,18) (17,19) (25,18) (25,19)
+       tiled_tv("C")[37 + 128·v] = m + 32n = 81, 113, 89, 121, 593, 625, 601, 633
+7) 反过来问：C[5][7] 由谁持有？
+       m=5 < 16 → wm = 0，cm = 5；n=7 < 8 → wn + 2r = 0 → wn = 0, r = 0，cn = 7
+       cn = 2q + (i&1) = 7 → q = 3, i&1 = 1；cm = g + 8·(i>>1) = 5 → g = 5, i>>1 = 0
+       lane = 4·5 + 3 = 23，v = fv = 1，t = 23 + 32·wm + 64·wn = 23   → [(23, 1)]，只有一个
+       A[9][2]：wm = 0，g = 1，q = 1，i = 2；但 wn 可以是 0 或 1 → t = 5 或 69 → [(5,2), (69,2)]
+```
+
+下面这张图可以任选一个 lane。三个矩阵里写着这个 lane 的寄存器名（a0..a7、b0..b3、c0..c3），浅青色是同一组（同一个 g）的另外 3 个 lane。下方面板把 g、q 代入每一个值的公式，打印出 `ptx_a / ptx_b / ptx_c` 和 `atom_tv` 在这个 lane 上应该返回的东西。先用默认的 lane 5 对照上面的草稿纸，再换成 0、4、31 自己验证。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">手算草稿 · 一个 lane 的 A / B / C fragment</div><img src="../figs/a4/a4_new-01.png" alt="手算草稿 · 一个 lane 的 A / B / C fragment" loading="lazy" style="width:100%;aspect-ratio:1461/1164"></figure>
+:::
+
+## 图解详解：fragment 映射、2×2 warp 与 K 循环
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+这一节把整道题画成五张可交互的图，每张对应一组要实现的函数。点按钮、拖滑块、把鼠标停在格子上，下方的面板会把当前状态逐步代入公式算给你看。
+
+先看全局：整道题就是下面这段伪代码里的“谁持有谁”。测试 `test_cta_tile_gemm_exact_and_counts` 按同样的结构检查结果和计数。
+
+```
+g, q = lane >> 2, lane % 4                          # ①  group_id / thread_in_group（图 1）
+a_i = ptx_a(lane, i); b_i = ptx_b(lane, i); c_i = ptx_c(lane, i)   # ②  三套不同的 PTX 公式
+atom_tv(X)[t + 32·v] = 列主序偏移(ptx_x(t, v))        # ③ 摊平成 TV 列表（图 3）
+t → (lane, wm, wn)，v → (fv, r)，平移到 32×32 tile      # ④ tiled_tv / holders（图 4）
+acc = zeros(128, 8)                                   # ⑤  cta_tile_gemm：累加器常驻寄存器（图
+for ks in range(K // 16):
+    for w in range(4):                                # 4 个 warp（GPU 上并行）
+        for r in range(2):                            # Tile<32,32,16> 带来的 N 方向重复
+            acc[warp w, 4r:4r+4] = warp_mma(A 片段, B 片段, acc[...])
+C_tile = scatter(acc, tiled_tv("C"))                  # 只在最后写回一次：1024 次
+```
+
+### 图 1 · lane → (groupID, threadID\_in\_group)
+
+32 个 lane 按 `lane = 4g + q` 排成 8 行（g）× 4 列（q）。把鼠标停在一个 lane 上：右边的 C（16×8）里，同一行 g 的 4 个 lane（浅色）一起覆盖 C 的第 g 行和第 g+8 行，q 决定其中哪两列（2q、2q+1）。这就是“groupID 管行，threadID\_in\_group 管列对”的全部含义。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">lane 的两个分量</div><img src="../figs/a4/a4_new-02.png" alt="lane 的两个分量" loading="lazy" style="width:100%;aspect-ratio:1461/1170"></figure>
+:::
+
+### 图 2 · 三张 fragment 地图：`ptx_a` / `ptx_b` / `ptx_c`
+
+这是 PTX 手册里那三张图的可交互版本：A（16×16）、B（以 N×K 存，8×16）、C（16×8）的每一个格子都写着持有它的 lane（或寄存器名）。颜色默认按“值编号 i 的一对”：A、B 里同色的两格就是同一个 32 位寄存器装的两个 half。
+
+- 悬停任一格子：这个 lane 在三张图里的所有元素同时高亮，其余变暗。对比 A 和 C：A 的左半边（k &lt; 8）的分布和 C 完全一样，右半边是它平移 8 列。
+- 把着色切到 `g` ：A、C 里每种颜色占两行（g 和 g+8）；B 里每种颜色占一整行（n = g）。切到 `q` ：每种颜色占相邻两列。
+- 用“只看值 i”逐个查看 a0..a7：a0/a1 在上半、a2/a3 在下半、a4..a7 是它们右移 8 列。B 的 b2/b3 是 b0/b1 右移 8 列，C 的 c2/c3 是 c0/c1 下移 8 行。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">m16n8k16 的 A / B / C fragment</div><img src="../figs/a4/a4_new-03.png" alt="m16n8k16 的 A / B / C fragment" loading="lazy" style="width:100%;aspect-ratio:1461/1066"></figure>
+:::
+
+源码对照：PTX 的原始规则在 [PTX ISA · Matrix Fragments for mma.m16n8k16 with floating point type](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-float)（A、B、C 三张图和 `groupID` / `threadID_in_group` 公式）。CuTe 里这条指令的寄存器个数写在 [[cutlass:include/cute/arch/mma_sm80.hpp#L158-L163|SM80_16x8x16_F32F16F16F32_TN]] ：
+
+`ARegisters = uint32_t[4]` 、`BRegisters = uint32_t[2]` 、`CRegisters = float[4]` ，正好对应 8 个 half、4 个 half、4 个 float。
+
+### 图 3 · 摊平成 TV 列表：`atom_tv`
+
+`atom_tv(which)` 是一张 32 列（t）× V 行（v）的表：格子 (t, v) 里写 列主序偏移`(ptx_x(t, v))` ，放在一维下标 `t +` `32·v` （线程变化最快）。读法：一行是“所有 lane 的同一个值”，沿一行往右走，偏移先按 q 跳（A、C 每次 +32，B 每次 +16），每 4 个 lane 回头再 +1（下一个 g）。悬停格子，右侧小图标出它在矩阵里的位置，面板给出 CuTe `ALayout / BLayout / CLayout` 的分解：
+
+::: raw
+<figure class="flow snap"><div class="flow-head">atom_tv(which)：(t, v) → 偏移</div><img src="../figs/a4/a4_new-04.png" alt="atom_tv(which)：(t, v) → 偏移" loading="lazy" style="width:100%;aspect-ratio:1461/1112"></figure>
+:::
+
+`(_32,_1)` 就是 `(q, g) → 32q + g` 。CuTe 官方文档 [[cutlass:media/docs/cpp/cute/0t_mma_atom.md#L143-L198|0t_mma_atom.md 的 Traits]]一[[cutlass:media/docs/cpp/cute/0t_mma_atom.md#L143-L198|节]] 讲了 `ThrID / ALayout /`源码对照：三个 layout 的定义在 [[cutlass:include/cute/atom/mma_traits_sm80.hpp#L43-L55|mma_traits_sm80.hpp 的 SM80_16x8_Row 等]] 和
+
+[[cutlass:include/cute/atom/mma_traits_sm80.hpp#L76-L92|MMA_Traits<SM80_16x8x16_F16F16F16F16_TN>]] （F32 累加版本 [[cutlass:include/cute/atom/mma_traits_sm80.hpp#L108-L116|直接继承它]]，只改了 ValType）。线程模式 `(_4,_8):` `BLayout / CLayout` 的含义。
+
+### 图 4 · 2×2 个 warp 拼成 32×32：`tiled_tv` / `holders`
+
+128 个线程：`lane = t % 32` ，`wm = (t // 32) % 2` ，`wn = t // 64` 。C 的 32×32 被切成 2（M）× 4（N）个 16×8 的 atom 块：warp (wm, wn) 拿第 wm 行、第 `wn` 和 `wn + 2` 列（r = 0, 1）的两块。拖动 t，看一个线程的 8 个值（格子里的数字是 v）分别落在哪里：
+
+- A 只依赖 wm：wn 不同的两个 warp（例如 t = 5 和 t = 69）拿到完全相同的 A 片段。B 只依赖 wn：t = 5 和 t = 37 拿到同样的 B。
+- C 每格只有一个持有者。悬停 C 的格子，看 `holders` 怎样把坐标反推回 (t, v)；悬停 A、B 的格子能看到两个持有者。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">TiledMMA：AtomLayout (2,2,1) · Tile&lt;32,32,16></div><img src="../figs/a4/a4_new-05.png" alt="TiledMMA：AtomLayout (2,2,1) · Tile&lt;32,32,16>" loading="lazy" style="width:100%;aspect-ratio:1461/1424"></figure>
+:::
+
+kernel 里怎样用：[[cutlass:examples/cute/tutorial/sgemm_sm80.cu#L298|sgemm_sm80.cu 的 gemm(mma, ...)]] 。CuTe 文档的 [[cutlass:media/docs/cpp/cute/0t_mma_atom.md#L436-L510|TiledMMA]][[cutlass:include/cute/atom/mma_atom.hpp#L397-L434|一]][[cutlass:media/docs/cpp/cute/0t_mma_atom.md#L436-L510|节]] 有同样构造的图。源码对照：[[cutlass:include/cute/atom/mma_atom.hpp#L525-L540|make_tiled_mma]] 把 atom 和 `AtomLayout` 、`Tile` 组合起来；[[cutlass:include/cute/atom/mma_atom.hpp#L397-L434|get_layoutC_TV / get_layoutA_TV]] 是本题 `tiled_tv` 的真身：A 版本多了一步 `atile` ，用 stride 0 把 N 方向的 warp 坐标“压掉”，这就是 A 被复制两份的来源。
+
+### 图 5 · 在寄存器里累加：`warp_mma` / `cta_tile_gemm`
+
+测试的例子：A、B 都是 32×64（B 以 N×K 存），K 切成 4 片，每片 16。按参考解的循环顺序 `ks → warp w → r` 一条一条播放 `mma.sync` ：每条只碰 C 的一个 16×8 块（atom 大小），A 用第 wm 块 16 行，B 用第 `wn + 2r` 块 8 行。注意：
+
+- C 的每个块格子上写着“已经累加了几次”，播放完 4 个 K 片后每块都是 4/4；整个过程中 `acc_stores` 一直是 0。
+- 只有最后一步“写回”时，128 个线程各写 8 个值：`acc_stores = 1024 = 32×32` ，`mma = 4` 片 `× 4 warp × 2` `= 32` 。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">C_tile = A · Bᵀ：32 条 mma.sync，累加器常驻寄存器</div><img src="../figs/a4/a4_new-06.png" alt="C_tile = A · Bᵀ：32 条 mma.sync，累加器常驻寄存器" loading="lazy" style="width:100%;aspect-ratio:1461/1276"></figure>
+:::
+
+### 速查：全部公式
+
+| 量 | 公式 | 每 lane /线程的值数 | 32 位寄存器 | CuTe layout |
+|---|---|---|---|---|
+| `g, q` | `lane >> 2` ，`lane % 4` ；`lane = 4g + q` | — | 线程模式 `(_4,_8)` ：先 q 后 g |  |
+| `ptx_a(lane, i)` | (g + 8·((i>>1)&1), 2q + (i&1) + 8·(i>>2)) | 8 half | 4 | `((_4,_8),(_2,_2,_2)): ((_32,_1), (_16,_8,_128))` |
+| `ptx_b(lane, i)` (n, k) | (g, 2q + (i&1) + 8·(i>>1)) | 4 half | 2 | `((_4,_8),(_2,_2)): ((_16,_1),(_8,_64))` |
+| `ptx_c(lane, i)` | (g + 8·(i>>1), 2q + (i&1)) | 4 float | 4 | `((_4,_8),(_2,_2)): ((_32,_1),(_16,_8))` |
+| `atom_tv(X)[t + 32v]` | A: m + 16k　B: n + 8k　C: m + 16n |  |  |  |
+| `tiled_tv` 的 t | lane = t % 32，wm = (t // 32) % 2，wn = t // 64（`thr_layout_vmnk = (_32,_2,_2,_1):(_1,_32,_64,_0)` ） |  |  |  |
+| `tiled_tv("A" )` | (am + 16·wm, ak)，偏移 m + 32k | 8 | 4 | fragment `((2,2,2),1,1)` ，2 个持有者 |
+| `tiled_tv("B" )` | v = fv + 4r：(bn + 8·(wn + 2r),bk)，偏移 n + 32k | 8 | 4 | fragment `((2,2),2,1)` ，2 个持有者 |
+| `tiled_tv("C" )` | v = fv + 4r：(cm + 16·wm, cn + 8·(wn + 2r))，偏移 m + 32n | 8 | 8 | fragment `((2,2),1,2)` ，1 个持有者 |
+| `cta_tile_gemm` | mma = (K/16)·4·2，k\_slices = K/16，acc\_stores = 128·8 = 1024（只在最后一次） |  |  |  |
+
+抓住两件事就够了：atom 内只有 g、q 和值编号 i 的几个比特（每个比特是“+1 列 / +8 行 / +8 列”之一）；atom 外只是按 warp 坐标和重复次数 r 平移整块。
+
 ## 逐步演示
 
 ::: steps lane 5、线程 37、元素 C[5][7]

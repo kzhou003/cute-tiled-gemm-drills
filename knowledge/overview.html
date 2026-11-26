@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>总览：一条主线、三类抽象、五个 track</title>
+<title>总览：一条主线、三类抽象、六个 track</title>
 
 <style>
 /* ai-infra-dev-skills · shared page styles (reports, knowledge pages, hint pages). No dependencies. */
@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3 cur" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3 cur" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,9 +277,15 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
-<header class="cover"><div class="kicker">领域知识</div><h1>总览：一条主线、三类抽象、五个 track</h1><p class="lede">这套练习的主线：先只从硬件需求出发设计一个 Tiled GEMM，看我们怎样“自然地发明”各种 layout；再看这些 layout 怎样用代数组合、CuTe 在编译期怎样化简和检查它们；最后把 TMA、pipeline、warp specialization 和 PDL 加进来，得到一个结构完整的现代 GEMM。</p></header>
+<header class="cover"><div class="kicker">领域知识</div><h1>总览：一条主线、三类抽象、六个 track</h1><p class="lede">这套练习的主线：先只从硬件需求出发设计一个 Tiled GEMM，看我们怎样“自然地发明”各种 layout；再看这些 layout 怎样用代数组合、CuTe 在编译期怎样化简和检查它们；最后把 TMA、pipeline、warp specialization 和 PDL 加进来，得到一个结构完整的现代 GEMM。</p></header>
 <h2 id="k-overview-1">先建立正确的心智模型</h2>
 <p>写 GEMM 时，数学公式只告诉我们<strong>算什么</strong>；高性能 kernel 还必须决定每个数据元素在 GPU 的存储层级和执行资源中<strong>怎样流动</strong>。CuTe 的中心抽象是 layout：把一个逻辑坐标映射到一个整数。这个整数可以是内存偏移、线程编号、线程内寄存器编号，或者 tile 内的位置。CuTe 把这些映射统一成可以组合、拆分、推导的对象（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/cute/01_layout.md">01_layout.md</a>）。</p>
 
@@ -353,9 +365,9 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <p>Track D、E 会把同一个设计“升级”成 Hopper 风格：TMA + mbarrier 多级流水线 + producer / consumer warp group + PDL。</p>
 
 <figure class="flow"><div class="flow-head">一个 GEMM 的数据流<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;一个 GEMM 的数据流&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;g&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Global A, B&quot;, &quot;s&quot;: &quot;原始矩阵&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;s&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Shared Memory&quot;, &quot;s&quot;: &quot;swizzled tile&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;r&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Registers&quot;, &quot;s&quot;: &quot;每线程 fragment&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;m&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Warp MMA&quot;, &quot;s&quot;: &quot;Tensor Core&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;acc&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;Accumulator&quot;, &quot;s&quot;: &quot;寄存器里的部分和&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;Global C&quot;, &quot;s&quot;: &quot;写回&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;g&quot;, &quot;b&quot;: &quot;s&quot;, &quot;t&quot;: &quot;① ②&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: true, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;s&quot;, &quot;b&quot;: &quot;r&quot;, &quot;t&quot;: &quot;③ ④&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;r&quot;, &quot;b&quot;: &quot;m&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;m&quot;, &quot;b&quot;: &quot;acc&quot;, &quot;t&quot;: &quot;⑤&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;acc&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;epilogue&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 185.0, &quot;rh&quot;: 96.0, &quot;nw&quot;: 135.0}}"></div><figcaption>每一个箭头都是一个“映射问题”：谁搬、搬到哪、怎么摆、谁拿哪个值、结果在谁手里。Track A 的五道题依次回答它们；结构对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/examples/cute/tutorial/sgemm_sm80.cu">sgemm_sm80.cu</a>。</figcaption></figure>
-<h2 id="k-overview-3">五个 track</h2>
+<h2 id="k-overview-3">六个 track</h2>
 
-<figure class="flow"><div class="flow-head">练习路线<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;练习路线&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;a&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;A 从零设计&quot;, &quot;s&quot;: &quot;五个映射 → GEMM&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;b&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;B Layout Algebra&quot;, &quot;s&quot;: &quot;重新表达 · 向量宽度&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;C 编译期&quot;, &quot;s&quot;: &quot;化简 · 合法性检查&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;D 时间维度&quot;, &quot;s&quot;: &quot;TMA · 流水线 · PDL&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;E 完整 GEMM&quot;, &quot;s&quot;: &quot;拼装 · 选配置&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;b&quot;, &quot;b&quot;: &quot;d&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;d&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;e&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 164.0}}"></div><figcaption>学习顺序：先把空间映射吃透，再理解 tile 结构和硬件映射，再学时间维度，最后是系统级执行（PDL、CUDA Graph、调度和 autotuning）。</figcaption></figure>
+<figure class="flow"><div class="flow-head">练习路线<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;练习路线&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;a&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;A 从零设计&quot;, &quot;s&quot;: &quot;五个映射 → GEMM&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;b&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;B Layout Algebra&quot;, &quot;s&quot;: &quot;重新表达 · 向量宽度&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;C 编译期&quot;, &quot;s&quot;: &quot;化简 · 合法性检查&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;d&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;D 时间维度&quot;, &quot;s&quot;: &quot;TMA · 流水线 · PDL&quot;, &quot;k&quot;: &quot;warn&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;e&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;E 完整 GEMM&quot;, &quot;s&quot;: &quot;拼装 · 选配置&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;f&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;F 上机&quot;, &quot;s&quot;: &quot;真实 CuTe kernel&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;b&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;a&quot;, &quot;b&quot;: &quot;c&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;b&quot;, &quot;b&quot;: &quot;d&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c&quot;, &quot;b&quot;: &quot;d&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;d&quot;, &quot;b&quot;: &quot;e&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;e&quot;, &quot;b&quot;: &quot;f&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 90.0, &quot;nw&quot;: 164.0}}"></div><figcaption>学习顺序：先把空间映射吃透，再理解 tile 结构和硬件映射，再学时间维度，最后是系统级执行（PDL、CUDA Graph、调度和 autotuning）。</figcaption></figure>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -390,24 +402,71 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <td>E1 完整的 Hopper 风格 GEMM · E2 配置搜索</td>
 <td><a href="real_code.html">真实代码导读</a></td>
 </tr>
+<tr>
+<td>F</td>
+<td>F1 SIMT · F2 Tensor Core · F3 多级流水线 · F4 边界与 epilogue · F5 配置扫描与 split-K</td>
+<td>上机：用真实 CuTe 在 GPU（RTX 5090）上写出来；<a href="config.html">配置决策</a>、<a href="e2e.html">端到端例子</a></td>
+</tr>
 </tbody>
 </table></div>
-<h2 id="k-overview-4">上机对拍</h2>
+<h2 id="k-overview-4">开始之前：硬件与配置系列（以 RTX 5090 为例）</h2>
+<p>这一组 6 页先建立硬件画面和数字直觉，再讲怎样定一个 GEMM 配置。建议在 Track A 之前读前两页，做 A1、A5、D2、D3、E2 时回来查后四页。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>页</th>
+<th>回答什么问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="hardware.html">硬件心智模型</a></td>
+<td>GPU 的层级（工厂类比）；5090 / H100 每一层的数字；存储层级；cache line、sector、bank；L1 和 SMEM 的关系；5090 上没有什么</td>
+</tr>
+<tr>
+<td><a href="execution.html">执行模型</a></td>
+<td>线程和 warp 各是什么粒度；SIMT；lane 什么时候不满；为什么 <code>mma</code> 必须整个 warp 一起；一个 SM 发射 / 驻留多少 warp 和 CTA；指令去 Tensor Core 还是 FP32 lane</td>
+</tr>
+<tr>
+<td><a href="sizing.html">怎样定 CTA / tile / warp 的数量</a></td>
+<td>BM / BN / BK 的命名；tiling 从输出出发；四种“数量”；参数分五层（哪些不变、为什么）；8192³ 的完整算例</td>
+</tr>
+<tr>
+<td><a href="tile_dims.html">BM、BN、BK 各管什么</a></td>
+<td>三个维度在矩阵和内存里的位置；为什么 128 B 的约束只落在 BK；约束地图；BK 的代价曲线（为什么是 64）</td>
+</tr>
+<tr>
+<td><a href="config.html">配置决策</a></td>
+<td>9 步决策流程；split-K / Stream-K 的原理、归约方式和怎样选 S；6 个形状的完整对比</td>
+</tr>
+<tr>
+<td><a href="e2e.html">端到端例子</a></td>
+<td>A[1024×1024] · B[1024×256]：7 种方案、五个映射的具体坐标、kernel 按时间顺序怎样跑</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="k-overview-5">上机对拍</h2>
 <p>CuTe 的 layout、TiledCopy、TiledMMA 都能在主机上编译运行：<code>oracle/&lt;stem&gt;.cpp</code> 直接 <code>#include &lt;cute/tensor.hpp&gt;</code>，用 <code>clang++</code> 编译，结果写进 <code>tests/golden/&lt;stem&gt;.json</code>。D2 的 oracle 直接用 CUTLASS 的 <code>PipelineState</code>。没有 GPU 也能跑的只有这些“记账”部分；TMA、mbarrier、warp specialization、PDL 的运行时行为用照着 CUTLASS 源码写的协议与时间线模拟器，讲解页里标明“未在 GPU 上运行”。</p>
 <pre><code class="language-bash">./check.sh a1                 # 对拍 golden（不需要编译器）
 tools/fetch_headers.sh        # 下载 CUTLASS、CCCL、CUDA 公共头文件
 ./check.sh oracle a1          # 用真实 CuTe 重新生成 golden
 playground/run.sh playground/a1_cta_tiling.cpp
 </code></pre>
-<p>继续阅读：<a href="from_scratch.html">从零设计</a> · <a href="algebra_compile.html">Layout Algebra 与编译</a> · <a href="time_dimension.html">时间维度</a> · <a href="real_code.html">真实代码导读</a> · <a href="references.html">参考资料</a>。</p>
+<p>Track F 在 GPU 上跑真实的 kernel：每题的主机部分（和真实 CuTe 对拍）和 <code>.cu</code> 的类型检查在没有 GPU 的机器上就能跑；对拍和计时要在有 NVIDIA GPU 的机器上（默认 RTX 5090 / <code>sm_120</code>，其他卡设 <code>CUTE_DRILL_ARCH</code>）。</p>
+<pre><code class="language-bash">./check.sh f3                 # 没有 GPU：主机部分 + 类型检查（GPU 测试显示 skipped）
+./check.sh f3 -s              # 在 5090 上：再加 nvcc 编译、对拍、计时，-s 打印每次运行的 JSON
+python3 tools/cu_drill.py run mine/f3_pipelined_gemm.cu 4096 4096 4096
+</code></pre>
+<p>继续阅读：<a href="hardware.html">硬件心智模型</a> · <a href="execution.html">执行模型</a> · <a href="config.html">配置决策</a> · <a href="from_scratch.html">从零设计</a> · <a href="algebra_compile.html">Layout Algebra 与编译</a> · <a href="time_dimension.html">时间维度</a> · <a href="real_code.html">真实代码导读</a> · <a href="references.html">参考资料</a>。</p>
 
 
 </main>
 <aside class="outline" aria-label="outline"><div class="ttl">本页内容</div>
 <a class="o2" href="#k-overview-1">先建立正确的心智模型</a>
 <a class="o2" href="#k-overview-2">贯穿全部练习的例子</a>
-<a class="o2" href="#k-overview-3">五个 track</a>
-<a class="o2" href="#k-overview-4">上机对拍</a></aside>
+<a class="o2" href="#k-overview-3">六个 track</a>
+<a class="o2" href="#k-overview-4">开始之前：硬件与配置系列（以 RTX 5090 为例）</a>
+<a class="o2" href="#k-overview-5">上机对拍</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

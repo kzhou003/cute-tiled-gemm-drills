@@ -47,6 +47,185 @@ e s -> m
 cap: 合法性只看描述符，与起点无关；越界判断只看起点和 gdims；SMEM 位置只看 box 内坐标和 swizzle。三件事互相独立，测试也分开检查。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+先别管 64×64 的 bf16 tile。拿一个小到每个格子都能写出来的张量，把一次 box load 从头到尾手算一遍：描述符合不合法、mbarrier 要等多少字节、哪些格子是真数据、哪些是填出来的 0、每个元素落到 SMEM 的第几个字节。然后放大到测试里的尺寸，最后写成一般公式。
+
+① 小：float 张量 6×5，box 4×4，部分越界
+
+gdims=(K=6, M=5)，行 pitch 8 个 float = 32 B。box 从 (k, m) = (4, 3) 开始，右边和下边都伸出张量。
+
+```
+validate = []，elements_per_dim = (4, 4)
+expect_tx = 4·4·4 = 64 B
+真实 4 个元素 16 B + 填零 12 个 48 B
+```
+
+② 测试：A\_TILE，half 的 16×32 box
+
+gdims=(64, 64)，pitch 128 B，32B swizzle。ragged 版本只有 50 行，从 m=32 开始。
+
+```
+expect_tx = 16·32·2 = 1024 B
+ragged：18 行真实（576 B）+ 14 行填零（448
+B）
+B_TILE 64×64 bf16，128B swizzle：8192 B
+```
+
+③ 边界情况：element stride、负起点、swizzle
+
+```
+elem_strides=(1,3)：ceil(32/3)=11 行 →
+352 B
+start=(-8, 0)：前 8 列填零（卷积 halo）
+32B swizzle：第 4..7 行的两个 16 B 块对调
+```
+
+④ 一般把 ①–③ 里的规律写成公式。
+
+```
+epd[i]  = ceil(box[i] / estride[i])
+tx      = Π epd[i] · elem_bytes
+g[i]    = start[i] + c[i]·estride[i]
+越界 ⇔ 某一维 g[i] < 0 或 g[i] ≥ gdims[i]
+SMEM    = Sw<B,4,3>(elem_bytes ·
+colex(c, epd))
+```
+
+**✎** 草稿纸 1：float a[m][k]，gdims=(6, 5)，gstrides=(32,)，box=(4, 4)，start=(4, 3)，不 swizzle
+
+```text
+约定：a[m][k] 的值写成 10m + k（34 就是 m=3, k=4）。内存里每行 8 个 float（32 B），k = 6, 7 是 pitch 补齐的空位。
+1) validate     rank 2：gdims / gstrides / box / estrides 长度 2,1,2,2              ✓ base 0 % 16 = 0 ✓   gdims 6, 5 ∈ [1, 2^32] ✓   gstrides 32 % 16 = 0 ✓，32 < 2^40 ✓
+                box 4, 4 ∈ [1, 256] ✓   estrides 1, 1 ∈ [1, 8] ✓
+                inner = box[0]·elem_bytes = 4·4 = 16 B，16 % 16 = 0 ✓   swizzle
+"none" ✓   → []
+     对比：pitch 若写成 6 个 float = 24 B → E_GSTRIDE_ALIGN；box[0] 若是 3 → 12 B →
+E_INNER_16B
+2) 字节数       elements_per_dim = (ceil(4/1), ceil(4/1)) = (4, 4)
+                expect_tx_bytes  = 4 · 4 · 4 B = 64 B            ← 和起点无关，只看描述符 3) 逐个 box 坐标 c = (c0, c1)，g = (4 + c0, 3 + c1)：            （0 ≤ g0 < 6 且 0 ≤ g1 < 5 才是真数据）
+         c1=0 → m=3：  k = 4  5  6  7   →  34  35   0   0      ← k=6,7 在 pitch 空位
+里，但 ≥ gdims[0]=6，填 0
+         c1=1 → m=4：  k = 4  5  6  7   →  44  45   0   0
+         c1=2 → m=5：  m=5 ≥ 5          →   0   0   0   0
+         c1=3 → m=6：  m=6 ≥ 5          →   0   0   0   0
+                真实 4 个元素 = 16 B，填零 12 个 = 48 B，合计仍是 64 B = expect_tx   ✓
+4) 地址         源（全局字节）= g0·4 + g1·32       目的（SMEM 字节）= 4·(c0 + 4·c1)，不
+swizzle
+         c=(0,0)  g=(4,3)：src = 16 + 96  = 112   dst = 0
+         c=(1,0)  g=(5,3)：src = 20 + 96  = 116   dst = 4
+         c=(0,1)  g=(4,4)：src = 16 + 128 = 144   dst = 16
+         c=(1,1)  g=(5,4)：src = 20 + 128 = 148   dst = 20
+         c=(3,3)  g=(7,6)：越界，dst = 60 处写 0
+5) 负起点 start=(-2, -1)：  m=-1 → 0 0 0 0 │ m=0 → 0 0 0 1 │ m=1 → 0 0 10 11 │ m=2 → 0 0 20 21
+   element stride (1, 2)，box=(4, 3)：epd = (4, ceil(3/2)) = (4, 2)，只取 m = 0, 2 两
+行，tx = 4·2·4 = 32 B
+```
+
+**✎** 草稿纸 2：half 的 box=(16, 8)，32B swizzle：SMEM 里每个 16 B 块去哪
+
+```text
+inner = 16·2 = 32 B ≤ 32（E_SWIZZLE_SPAN 通过）。box 共 8 行 × 32 B = 256 B = 两条 128 B
+线。
+第 r 行的两个 16 B 块：线性字节 32r（块 0）和 32r + 16（块 1）。
+Swizzle<1,4,3>：把第 7 位（第几条 128 B 线的最低位）异或进第 4 位（块号的最低位）
+         r = 0..3：32r < 128，第 7 位 = 0                 → 不动
+         r = 4..7：32r ≥ 128，第 7 位 = 1 → 第 4 位翻转   → 块 0 和块 1 对调
+         r=4：块 0  128 = 0b1000_0000 → 0b1001_0000 = 144     块 1  144 → 128
+         r=5：块 0  160 → 176                                   块 1  176 → 160
+所以 smem_byte_offset((k=0, m=4)) = 144，换成元素就是 72：tile_element_map(8, 16, 2,
+"32B")[:8] = [0, 16, 32, 48, 72, 88, 104, 120]
+128B 模式同理，只是 3 位：第 r 行（每行 128 B）的块 c 去 c ^ (r % 8)。
+```
+
+下面这张图就是草稿纸 1 的张量，可以随意移动 box、改 box 大小和 M 方向的 element stride。左边是全局内存（每格写值 10m+k，灰色斜线是 pitch 补齐的空位），右边是搬进 SMEM 的稠密 box。绿色是真数据，红色斜线是越界填零。下方面板打印 `validate` 、`elements_per_dim` 、`expect_tx_bytes` 和 `unswizzle(box_load(...))` 应该返回的东西。先用默认预设对照草稿纸，再自己拖。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">手算草稿 · float 6×5 张量上的 TMA box</div><img src="../figs/d1/d1_new-01.png" alt="手算草稿 · float 6×5 张量上的 TMA box" loading="lazy" style="width:100%;aspect-ratio:1461/1496"></figure>
+:::
+
+## 图解详解：描述符、字节数、越界与 swizzle
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+前面的流程图只给了三条互相独立的路径。这一节每条路径配一张可交互的图，每张对应一个或几个要实现的函数。点按钮、拖滑块、把鼠标停在格子上，下方面板会把当前状态逐步代入公式。
+
+整道题在真实 kernel 里对应下面这几行伪代码。生产者 warp 的一个线程发 TMA，消费者等 mbarrier：
+
+```
+desc = make_tma_copy_desc(gA, smem_layout)          # 主机端：layout → TmaDesc，validate 的十
+# ---- kernel，生产者线程 ----
+mbar.arrive_and_expect_tx(expect_tx_bytes(desc))   # 先报这一轮要来多少字节（图 2）
+tma_load(desc, mbar, smem, start=(k0, m0))         # 硬件：逐个 box 坐标 → 全局坐标 → 越界写 0
+                                                   #       → SMEM 字节位置 = swizzle_byte(.
+# ---- 消费者 ----
+mbar.wait(phase)                                   # tx 归零才放行：越界填零的字节也必须算进去
+wgmma(smem, ...)                                   # 按同一个 swizzle 读；CPU 上用 unswizzle
+```
+
+### 图 1 · 描述符合法性：`validate` 的十条规则
+
+每条规则只看描述符本身，和起点无关。选一个预设，或者单独改某个字段，看哪几条变红。注意三件事：
+
+- gstrides 是字节：128 B 合法，100 B 和 120 B 不是 16 的倍数。
+- `E_INNER_16B` 和 `E_SWIZZLE_SPAN` 都看最内层一行的字节数 `box[0]·elem_bytes` ，不看整个 box。
+- 维数对不上（“gstrides=()”）时只报 `E_RANK` ，后面九条直接跳过（灰色）。swizzle 名字不认识时也不再查跨度。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">validate(desc)：按顺序检查，全部报告</div><img src="../figs/d1/d1_new-02.png" alt="validate(desc)：按顺序检查，全部报告" loading="lazy" style="width:100%;aspect-ratio:1461/1205"></figure>
+:::
+
+源码对照：这些检查在 [[cutlass:include/cute/atom/copy_traits_sm90_tma.hpp#L955-L1024|make_tma_copy_desc 的 assert]] ，随后的驱动调用在 [[cutlass:include/cute/atom/copy_traits_sm90_tma.hpp#L1036-L1059|cuTensorMapEncodeTiled]] （注意`gmem_prob_stride.data() + 1` ：维度 0 的 stride 隐含为一个元素，正是本题 `gstrides` 从维度 1 开始的原因）。驱动端的完整限制见 [CUDA Driver API · Tensor Map Object Management](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html)。
+
+### 图 2 · expect\_tx 与越界填零：测试尺寸的 A\_TILE
+
+换到测试里的尺寸：half 张量 gdims=(K=64, M)，box=(16, 32)。左边是全局张量（每格 = 1 个 half，缩得很小），box 选中的每一行画成一条 16 元素的横条：绿色是真数据，红色斜线是越界。右边是 SMEM 里的字节账本：每一行 box 占 16·2 = 32 B，按行叠起来就是 expect\_tx。默认是测试 `test_box_load_out_of_bounds_fills_zero` ：只有 50 行，从 m=32 开始，第 18 行起全部填零，但账本的总长度仍然是 1024 B。
+
+试试 element stride = 3：box 的 32 行只取 m = 32, 35, …, 62 这 11 行，账本缩成 352 B。再试“负起点”：start=(-8, 0)，每行左半边越界。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">box_load 的字节账本：越界填零也算 tx</div><img src="../figs/d1/d1_new-03.png" alt="box_load 的字节账本：越界填零也算 tx" loading="lazy" style="width:100%;aspect-ratio:1461/1248"></figure>
+:::
+
+源码对照：CUTLASS 的 Hopper 主循环把 tx 字节数写成编译期常量，就是整块 smem tile 的大小，根本不看边界，见 [[cutlass:include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized.hpp#L264-L269|TmaTransactionBytes]] ；它被交给 [[cutlass:include/cutlass/arch/barrier.h#L625-L639|arrive_and_expect_tx]] （PTX `mbarrier.arrive.expect_tx` ）。TMA 指令本身是 [[cutlass:include/cute/arch/copy_sm90_tma.hpp#L103-L133|SM90_TMA_LOAD_2D]] 里的 `cp.async.bulk.tensor.2d…mbarrier::complete_tx::bytes` 。CuTe 编码描述符时选的`CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE` （[[cutlass:include/cute/atom/copy_traits_sm90_tma.hpp#L1041|copy_traits_sm90_tma.hpp]] ）就是“越界填 0”（另一种选项是填 NaN）。PTX 文档里对应的几节：[cp.async.bulk.tensor](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-bulk-tensor)、[tiled 模式的 bounding box](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-bounding-box)、[traversal stride（element stride）](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-traversal-stride)、[越界访问](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-tiled-mode-oob-access)；CUDA 编程指南的 [Using TMA to transfer multi-dimensional arrays](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#using-tma-to-transfer-multi-dimensional-arrays) 有完整的主机端编码 + kernel 端 `expect_tx` 示例。
+
+### 图 3 · `swizzle_byte` ：Swizzle&lt;B,4,3> 在字节地址上读哪几位、写哪几位
+
+把字节偏移写成二进制，从右往左分三段：bit 0–3 是 16 B 块内的字节（永远不动），bit 4–6 是 128 B 线里的第几个 16 B 块，bit 7–9 是第几条 128 B 线。swizzle 只做一件事：把线号的低 B 位异或进块号的低 B 位。所以块不会被拆开（低 4 位不动），数据也不会离开自己的 128 B 线（第 7 位以上不动）。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">off ^ ((off & yyy) >> 3)，yyy = ((1&lt;&lt;B)−1) &lt;&lt; 7</div><img src="../figs/d1/d1_new-04.png" alt="off ^ ((off & yyy) >> 3)，yyy = ((1&lt;&lt;B)−1) &lt;&lt; 7" loading="lazy" style="width:100%;aspect-ratio:1461/903"></figure>
+:::
+
+源码对照：通用的 [[cutlass:include/cute/swizzle.hpp#L55|cute::Swizzle<B,M,S>]] （注释里的 `YYY` / `ZZZ` 图示就是上面这三行），作用在指针字节地址上的是 [[cutlass:include/cute/pointer_swizzle.hpp#L84-L88|swizzle_ptr::apply_swizzle]] 。PTX 对四种模式的官方画法见 [Tensor swizzling modes](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#tensor-swizzling-modes)。
+
+### 图 4 · box → SMEM：每个 16 B 块落在哪条线的哪个槽
+
+左边是逻辑 box：每行 `box[0]·elem_bytes` 字节，切成 16 B 的块，块按行内序号上色（块 0 蓝、块 1 紫……）。右边是 SMEM：每行一条 128 B 线、8 个 16 B 槽。不 swizzle 时颜色一列一列排得整整齐齐；打开 swizzle 后，同一种颜色（同一列 k 的数据）在不同行落到不同的槽里，这就是 WGMMA 和 TMA 读写都没有 bank conflict 的原因。默认是草稿纸 2：half 的 16×8 box、32B swizzle，第 4–7 行两块对调。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">smem_byte_offset：逻辑 (行, 块) → SMEM (线, 槽)</div><img src="../figs/d1/d1_new-05.png" alt="smem_byte_offset：逻辑 (行, 块) → SMEM (线, 槽)" loading="lazy" style="width:100%;aspect-ratio:1461/1212"></figure>
+:::
+
+源码对照：GMMA 的 smem atom（`Layout_K_SW32/64/128_Atom` ）在 [[cutlass:include/cute/atom/mma_traits_sm90_gmma.hpp#L70-L84|mma_traits_sm90_gmma.hpp]] ，atom 的`Swizzle<B,4,3>` 被 [[cutlass:include/cute/atom/copy_traits_sm90_tma_swizzle.hpp#L48-L73|get_tma_swizzle_bits]] 翻译成 TMA 的 swizzle 模式：TMA 写和 WGMMA 读必须用同一个花样。
+
+### 速查
+
+| 函数 | 公式 | 小例子（草稿纸） | 测试尺寸 |
+|---|---|---|---|
+| `validate(desc)` | 先查 rank / 长度，不对只报 E\_RANK；再按顺序查 ALIGN · GDIM ·GSTRIDE\_ALIGN ·GSTRIDE\_MAX · BOX ·ESTRIDE · INNER\_16B ·SWIZZLE\_MODE / SPAN | float (6,5)，pitch 32 → []；pitch 24 → E\_GSTRIDE\_ALIGN | B\_TILE + "64B" → 只有 E\_SWIZZLE\_SPAN |
+| `elements_per_dim` | ceil(box[i] / estride[i]) | (4,3)，estride (1,2) → (4,2) | (16,32)，estride (1,3) → (16, 11) |
+| `expect_tx_bytes` | Π elements\_per\_dim ·elem\_bytes（越界也算） | 4·4·4 = 64（真实 16 + 填零 48） | 1024 · 8192 · 352 |
+| `swizzle_byte(off, m)` | off ^ ((off & (((1&lt;&lt;B)−1)&lt;&lt;7)) >> 3) | 32B：128 → 144 | 128B：421 → 405，1152 → 1168 |
+| `smem_byte_offset` | swizzle\_byte(eb · (c0 + epd0·c1 + …)) | (k=0, m=4)，half 16 宽，32B → 144 | B\_TILE (0, 1) → 144 |
+| `box_load` | g = start + c·estride；越界写 0；src = g0·eb + Σg[i]·gstrides[i−1] | start (4,3) → \[\[34,35,0,0],[44,45,0,0],0…] | 50 行 ragged：tile[18:] == 0 |
+| `unswizzle` | out[i·eb] = smem[swizzle\_byte(i·eb)]（自逆） | 还原出的逻辑 tile 与 numpy 切片相同 |  |
+| `tile_element_map` | out[m + rows·k] = swizzle\_byte((m·inner + k)·eb) // eb | (8, 16, 2, "32B") 每行首元素 0,16,32,48,72,88,104,120 | (64, 64, 2, "128B") 每行首元素 0,72,144,216,… |
+
+三件事互相独立：合法性只看描述符，越界只看起点和 gdims，SMEM 位置只看 box 内坐标和 swizzle。expect\_tx 只看描述符，所以它可以在编译期写成常量。
+
 ## 逐步演示
 
 ::: steps B_TILE = TmaDesc(2, (64, 256), (128,), (64, 64), swizzle="128B")
@@ -100,6 +279,33 @@ assert(smem_box_stride[i] >= 1 && smem_box_stride[i] <= 8);
 ```
 
 `E_INNER_16B` 和 `E_SWIZZLE_SPAN` 不在这段 assert 里：它们是 CUDA 驱动文档对 `cuTensorMapEncodeTiled` 的要求，违反时由驱动返回错误。atom 到 TMA 模式的映射在 `get_tma_swizzle_bits`：M == 4（16 字节块）时 B = 0/1/2/3 分别是 DISABLE / B32 / B64 / B128。
+
+## 真实代码
+
+CuTe 建描述符时检查的硬件限制，简化自 [[cutlass:include/cute/atom/copy_traits_sm90_tma.hpp#L955-L1024|make_tma_copy_desc]] ：
+
+```
+assert((reinterpret_cast<uint64_t>(gmem_address) & 0b1111) == 0);  // Address must be 16B-
+assert(gmem_prob_shape[i] >= 1 && gmem_prob_shape[i] <= (uint64_t(1) << 32));
+assert(gmem_prob_stride[0] == 1 && "Majorness of smem doesn't match majorness of gmem");
+assert((gmem_prob_stride[i]) < (uint64_t(1) << 40));   // Stride must be max 2^40
+assert((gmem_prob_stride[i] & 0b1111) == 0);           // Stride must be multiple of 16B
+assert(smem_box_shape[i]  >= 1 && smem_box_shape[i]  <= (uint32_t(1) << 8));  // max 256
+assert(smem_box_stride[i] >= 1 && smem_box_stride[i] <= 8);
+```
+
+`E_INNER_16B` 和 `E_SWIZZLE_SPAN` 不在这段 assert 里：它们是 CUDA 驱动文档对 `cuTensorMapEncodeTiled` 的要求，违反时由驱动返回错误。
+
+swizzle 作用在字节地址上，简化自 [[cutlass:include/cute/pointer_swizzle.hpp#L84-L88|swizzle_ptr::apply_swizzle]] ：
+
+```
+template <class T>
+static T* apply_swizzle(T* ptr) {
+  return reinterpret_cast<T*>(SwizzleFn::apply(reinterpret_cast<uintptr_t>(ptr)));
+}
+```
+
+atom 到 TMA 模式的映射，简化自 [[cutlass:include/cute/atom/copy_traits_sm90_tma_swizzle.hpp#L48-L73|get_tma_swizzle_bits]] ：`M == 4` （16 字节块）时 `B = 0/1/2/3` 分别是 `DISABLE / B32 / B64 / B128` 。
 
 ## 上机验证
 

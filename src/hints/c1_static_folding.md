@@ -51,6 +51,211 @@ e sr -> ct
 cap: 前三个 pass 是“表达式层面”的化简，coalesce 是“layout 层面”的化简：它能看出 `(32,16):(1,32)` 就是恒等函数，而表达式化简只能得到 `(i & 31) + ((i >> 5) << 5)`。CuTe 在组合 layout 时总是先 coalesce（[[cutlass:include/cute/layout.hpp@composition_impl|composition_impl]] 之前的 `coalesce_x`），所以很多化简在生成表达式之前就完成了。
 :::
 
+## 从小例子开始：先在草稿纸上手算
+
+运行例子的表达式树有 59 个节点，直接盯着它看很难看出规律。先拿一个小到每个节点、每个格子都能手写出来的例子：一个 4×2 的 tile 放在每行 8 个元素（ld = 8）的行主序矩阵里，第 k 轮 tile 往右挪 2 列。它和运行例子的 `offset = m·64 +` `(k·16 + kk)` 是同一个形状，只是数字小。推完之后再放大到测试里的尺寸，最后看一般规则。
+
+① 小：tile (4,2)，ld = 8，静态
+
+15 个节点的树，四个 pass 每一步都能手写。
+
+```
+offset = (i%4)·8 + (k·2 + i//4)·1
+原始  {+:2, *:3, %:1, //:1}  7 个
+fold  {+:2, *:2, %:1, //:1}  6 个
+SR    {+:2, <<:2, &:1, >>:1}  0 个乘除模
+hoist step = 2
+```
+
+② 同一个小例子，动态
+
+shape、stride 换成运行时的 bm、bk、ld，结构完全一样。
+
+```
+fold 只能删掉 ·1
+SR    什么也做不了：
+      {+:2, *:2, %:1, //:1}
+hoist step = bk
+```
+
+③ 运行例子：copy\_offset\_expr(True)
+
+TV layout ((4,32),(4,1)):((128,1),(32,0))，tile (32,16)，ld = 64。
+
+```
+原始  59 节点 {+:5, *:7, %:3, //:3}
+fold  41 节点 {+:4, *:4, %:3, //:2}
+SR    41 节点 {+:4, <<:4, &:3, >>:2}
+hoist step = 16，base 11 个运算
+```
+
+④ 一般
+
+每个 pass 只看局部模式；能不能消掉乘除，只取决于常数是不是 2 的幂、是不是编译期已知。
+
+```
+fold：c⊕c → 值；x·1, x+0, x//1 → x
+      x·0, x%1 → 0；常量链合并
+SR：  ·2ⁿ → <<n；//2ⁿ → >>n；%2ⁿ → &
+(2ⁿ−1)
+hoist：e = base + k·step
+```
+
+**✎** 草稿纸 ①：tile (4,2) 在 ld = 8 的矩阵里，第 k 轮
+
+```text
+1) 坐标   idx2crd_expr(i, (4, 2))：前缀积 1 → 4
+          m  = i % 4                 ← 第 0 个模式取模
+          kk = i // 4                ← 最后一个模式只除不模（CuTe 约定）
+2) 地址   layout_expr((8, 1), (m, k·2 + kk))
+          = ((i % 4) * 8) + (((k * 2) + (i // 4)) * 1)
+          树：      +
+                 /     \
+               *         *
+              / \       /  \
+             %   8     +    1        ← 15 个节点
+            / \       /  \
+           i   4     *    //
+                    / \   / \
+                   k   2 i   4
+          count_ops = {+:2, *:3, %:1, //:1}       ← 7 个运行时运算
+3) fold   自底向上：(… ) * 1 → …（x*1 → x），其他节点没有可用的规则
+          = ((i % 4) * 8) + ((k * 2) + (i // 4))   {+:2, *:2, %:1, //:1}
+4) SR     8 = 2³ → <<3；  2 = 2¹ → <<1；  %4 → &3；  //4 → >>2
+          = ((i & 3) << 3) + ((k << 1) + (i >> 2))   {+:2, <<:2, &:1, >>:1}
+5) 验算   i = 5, k = 1：5 & 3 = 1 → 1 << 3 = 8；  1 << 1 = 2；  5 >> 2 = 1
+          offset = 8 + (2 + 1) = 11            （第 1 行第 3 列：1·8 + 3 = 11 ✓）
+          k = 0：i = 0..7 → [0, 8, 16, 24, 1, 9, 17, 25]
+          k = 1：i = 0..7 → [2, 10, 18, 26, 3, 11, 19, 27]   ← 每个都 +2
+6) hoist  把 + 树摊平：[(i&3)<<3,  k<<1,  i>>2]
+          含 k 的项只有 k<<1 → step = 1<<1 = 2
+          base = ((i & 3) << 3) + (i >> 2)            {+:1, <<:1, &:1, >>:1}
+          base(5) = 8 + 1 = 9，9 + 1·2 = 11 ✓
+7) 动态   同样的树，叶子 4、2、8 换成 bm、bk、ld：
+          fold → ((i % bm) * ld) + ((k * bk) + (i // bm))
+          SR   → 不变（编译器不知道 bm 是不是 2 的幂）
+          hoist → step = bk，base 里还留着 *、%、//
+```
+
+**✎** 草稿纸 ③：把运行例子代入一个线程（tid = 127, v = 3, k = 1）
+
+```text
+tc = idx2crd(127, (4, 32)) = (127 % 4, 127 // 4) = (3, 31)
+vc = idx2crd(3,   (4, 1))  = (3 % 4,   3 // 4)    = (3, 0)
+idx = 3·128 + 31·1 + 3·32 + 0·0 = 384 + 31 + 96 + 0 = 511
+(m, kk) = idx2crd(511, (32, 16)) = (511 % 32, 511 // 32) = (31, 15)
+offset = 31·64 + (1·16 + 15)·1 = 1984 + 31 = 2015          ← golden
+off_static_k1[127·4+3] = 2015 ✓
+化简后：(127&3)<<7 = 384，127>>2 = 31，(3&3)<<5 = 96 → idx = 511；511&31 = 31，511>>5 =
+15
+        (31<<6) + ((1<<4) + 15) = 1984 + 31 = 2015 ✓
+```
+
+下面这个小游乐场可以改 tile 的 shape、ld 和模式。上面是当前阶段的表达式树，绿色是这个 pass 新造出来的节点（fold 在这个例子里只删不造，所以 ② 没有绿色；③ 里每个移位、按位与都是新的），红色虚线框是下一个 pass 会改写或删掉的节点。右边是矩阵本身，格子里写的是 tile 内索引 i（当前 k 那一块）。下方面板打印出每个函数应该返回的东西。试试把 shape 改成 (3,2)：3 不是 2 的幂，`% 3` 和 `// 3` 会一直留到最后。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">小游乐场 · 一个 tile 的地址表达式</div><img src="../figs/c1/c1_new-01.png" alt="小游乐场 · 一个 tile 的地址表达式" loading="lazy" style="width:100%;aspect-ratio:1461/1506"></figure>
+:::
+
+## 图解详解：一棵地址表达式树怎样被一步步削减
+
+::: callout info 关于这一节的图
+这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。
+:::
+
+这一节有七张可交互的图，每张对应一个要实现的函数。点按钮、拖滑块、把鼠标停在节点或格子上，下方面板会把当前状态逐步代入公式。所有图里的化简都由页面里的一份 JS 实现计算，规则和参考解逐条相同，并且在 2000 个随机表达式上和 Python 参考解对拍过，结果一致。
+
+整道题的数据流就是这几行：
+
+```
+e = copy_offset_expr(True)          # 图 1：TV layout → tile 坐标 → gmem offset，59 个节点
+f = fold(e)                         # 图 2：常量折叠 + 恒等式，自底向上到不动点
+s = strength_reduce(f)              # 图 3：×、÷、% 2 的幂 → 移位 / 按位与
+count_ops(s)                        # 图 4：结构相同的子树只算一次（CSE）
+layout_index_expr(i, sh, st, True)  # 图 5：先 coalesce，表达式化简看不出来的恒等函数直接消失
+base, step = hoist(e, "k")          # 图 6：K 循环里只剩“指针 += step”
+# 图 7：真实 clang 把同一个 CuTe 地址编成什么指令
+```
+
+### 图 1 · 运行例子的表达式树：每个 pass 改了哪些节点
+
+`idx` （TV layout 算出的 tile 内索引）在 `m` 和 `kk` 里各用一次，所以这里把它画成左边单独一棵树，右边那棵树里紫色的 `idx` 叶子就指向它（这正是 CSE 之后的样子）。切换阶段看：fold 删掉 `·1` 、`·0` 和整个 `(v//4)·0` 分支（节点 59 → 41）；strength\_reduce 节点数不变，只是把每个 `* // %` 换成 `<< >> &` ；hoist 把 `k<<4` 整个拿走。切到“动态”再看：同样的位置留下了 `* bm` 、`% bm` 、`// bm` 、`* ld` 。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">copy_offset_expr 的两棵树</div><img src="../figs/c1/c1_new-02.png" alt="copy_offset_expr 的两棵树" loading="lazy" style="width:100%;aspect-ratio:1461/1342"></figure>
+:::
+
+源码对照：`tv(tid, v)` 对每个顶层模式调用整数坐标版的 `crd2idx` ，它在最后一个模式上不取模（[[cutlass:include/cute/stride.hpp#L76-L95|crd2idx_itt ： Avoid recursion and mod on single/last iter]] ），这就是题面规则 2 的出处。
+
+::: callout warn 一个和真实 CuTe 的细微差别
+`tile.get_hier_coord(idx)` 调用的是带 stride 的 [[cutlass:include/cute/stride.hpp#L169-L215|idx2crd(i, s, d) = (i / d) % s]] ，它对每个模式都取模，包括最后一个。所以 oracle 里真实的 `kk` 是 `(idx / 32) % 16` ，而本题的模型（`idx2crd_expr` ）把它写成 `idx // 32` 。对 `idx < 512` 两者相等，所以 golden 一致；但真实汇编里多出来的 4 条指令（图 7 紫色）正是这个 `% 16` 。
+:::
+
+### 图 2 · `fold` ：自底向上，一次访问一个节点
+
+`fold` 的核心是“先化简两个孩子，再看这个节点能用哪条规则”。下面按后序（左孩子、右孩子、自己）一个个节点播放。灰色是已经访问过但没变的节点，绿色是规则改写过的节点，黄色是当前节点，上方小框是它化简后的结果。注意 `((x*2)*4)*1` ：内层先变成 `x*8` ，外层看到的已经是 `x*8` 和 `1` ，所以一轮自底向上就做完了，第二轮只是确认没有变化。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">fold 的访问顺序与触发的规则</div><img src="../figs/c1/c1_new-03.png" alt="fold 的访问顺序与触发的规则" loading="lazy" style="width:100%;aspect-ratio:1461/1079"></figure>
+:::
+
+### 图 3 · `strength_reduce` ：乘、除、模 2ⁿ 在二进制里是什么
+
+为什么只有 2 的幂能换：在二进制里，`x·2ⁿ` 就是整体左移 n 位，`x // 2ⁿ` 就是右移 n 位（低 n 位掉出去），`x % 2ⁿ` 就是只留低 n 位（和 `2ⁿ−1` 按位与）。每一位的颜色跟着它自己走，你能看到移位只是在“搬格子”。换成 6、3、5 这样的数就没有这种对应关系，本题的规则保持原样。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">x 的二进制与三种改写</div><img src="../figs/c1/c1_new-04.png" alt="x 的二进制与三种改写" loading="lazy" style="width:100%;aspect-ratio:1461/747"></figure>
+:::
+
+### 图 4 · `count_ops` ：同一个子树只算一次
+
+这次把 `idx` 展开两份，画出完整的树。`count_ops` 从根开始先序遍历，第一次见到的子树计数（绿色），以后再遇到结构相同的子树就整棵跳过（半透明）。把鼠标停在任何一个节点上，所有和它结构相同的节点都会被黄框圈出来。切换到“每个节点都数”就是没有 CSE 的计数：静态化简后的 `>>` 会被数成 3 个，而测试要求 2 个。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">CSE：展开的树与 count_ops 的访问</div><img src="../figs/c1/c1_new-05.png" alt="CSE：展开的树与 count_ops 的访问" loading="lazy" style="width:100%;aspect-ratio:1461/1199"></figure>
+:::
+
+### 图 5 · `coalesce_flat` ：表达式化简看不见的全局事实
+
+列主序的 4×2 layout `(4,2):(1,4)` 把 i 映射到 i 自己，但它的表达式化简完是 `(i & 3) + ((i >> 2) << 2)` ：局部看，`&3` 和 `>>2 <<2` 都没法再化简。coalesce 看的是模式之间的关系：前一个模式 `4:1` 走完一圈正好到 `4·1 = 4` ，等于下一个模式的 stride 4，所以两个模式能合成一个 `8:1` 。逐步播放看每个模式被丢掉、合并还是保留。最下面一排是 L(i)：全是绿色就说明它是恒等函数。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">coalesce 一个模式一个模式地合并</div><img src="../figs/c1/c1_new-06.png" alt="coalesce 一个模式一个模式地合并" loading="lazy" style="width:100%;aspect-ratio:1461/1023"></figure>
+:::
+
+源码对照：CuTe 的 [[cutlass:include/cute/layout.hpp#L773-L815|bw_coalesce]] 从右往左做同样的事（注释里那张“continue / replace\_front / prepend”表），合并条件是 `is_constant<true, s*d == d'>` ：只有静态整数才能合并，动态 layout 的模式永远不会被 coalesce。`composition` 在动手之前先 `coalesce_x` 左边的 layout（[[cutlass:include/cute/layout.hpp#L1134-L1141|composition]] ）。概念讲解见 [[cutlass:media/docs/cpp/cute/02_layout_algebra.md|02_layout_algebra.md]] 的 Coalesce 一节。
+
+### 图 6 · `hoist` ：K 循环里只剩“指针 += 16”
+
+这是 CTA (0,0) 在 A[64,64] 上读的 32 行 × 64 列，四种颜色是 k = 0..3 四轮的 tile。选一个线程：它每一轮读同一行里连续的 4 个元素（v = 0..3），四轮之间正好往右挪 16 列，也就是 offset 加 16。`hoist` 证明了这一点：`offset = base(tid, v)` `+ k·16` ，base 只在循环外算一次。悬停任意格子可以反查它属于哪个 (tid, v, k)。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">一个线程四轮的地址 = base + k·step</div><img src="../figs/c1/c1_new-07.png" alt="一个线程四轮的地址 = base + k·step" loading="lazy" style="width:100%;aspect-ratio:1461/1562"></figure>
+:::
+
+### 图 7 · 和真实编译器对照：clang -O2 的 ARM64 汇编
+
+图里的数据来自写这页时的一次编译（Apple clang 21，`-O2`，ARM64）：用真实 CuTe 头文件编译 `oracle/c1_asm/index_fns.cpp`，再按助记符分类计数。本仓库的 `oracle/c1_asm.sh` 做同样的编译，把本机的结果写进 `tests/golden/c1_asm.json`（每个函数的指令数、乘除指令和完整的指令列表），编译器版本不同时数字会略有出入。第三行“静态 + unsigned”是额外编译的：把 `off_static` 的参数和 `idx` 改成 `unsigned` ，其余不变（Apple clang 21，同样的 `-O2` ），并用 2048 个 offset 和 golden 对拍过。下面的指令表按“作用”上色，悬停一行看它在算表达式里的哪一部分。
+
+::: raw
+<figure class="flow snap"><div class="flow-head">off_static vs off_dynamic：指令数与每条指令的作用</div><img src="../figs/c1/c1_new-08.png" alt="off_static vs off_dynamic：指令数与每条指令的作用" loading="lazy" style="width:100%;aspect-ratio:1461/2363"></figure>
+:::
+
+GPU 上整数除法没有单条硬件指令，编译器会展开成一串乘法和修正（CUDA C++ Programming Guide 的 [Arithmetic Instructions](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#arithmetic-instructions) 一节专门提醒整数除法和取模很贵，除数是 2 的幂时会被换成移位和按位与），所以“静态 layout 没有乘除”在 GPU 上比在 CPU 上更值钱。
+
+### 速查
+
+| 函数 | 做什么 | 小例子 (4,2),ld=8 | 运行例子（静态） |
+|---|---|---|---|
+| `idx2crd_expr(idx, shape)` | colex：c₀ = idx % s₀，cᵢ = (idx //Πs&lt;ᵢ) % sᵢ，最后一个只除不模 | `(i % 4, i // 4)` | `idx2crd(tid,(4,32)) = (tid%4, tid//4)` |
+| `layout_expr(stride, coord)` | Σ cᵢ·dᵢ，从左到右累加 | `(i%4)·8 + (k·2 + i//4)·1` | 59 节点，`{+:5, *:7, %:3, //:3}` |
+| `fold` | c⊕c → 值；·1、+0、//1 去掉；·0、%1 → 0；(x·c₁)·c₂、(x//c₁)//c₂、(x+c₁)+c₂ 合并；常量放右边 | `{+:2, *:2, %:1, //:1}` | 41 节点，`{+:4, *:4, %:3, //:2}` |
+| `strength_reduce` | 右边是 2ⁿ（n ≥ 1）：·→&lt;&lt;n，// →>>n，%→&(2ⁿ−1) | `((i&3)<<3) + ((k<<1) + (i>>2))` | `{+:4, <<:4, &:3, >>:2}` ；动态 `{+:4, *:4, %:1, //:1, &:2, <<:1, >>:1}` |
+| `count_ops` | 先序遍历，结构相同的子树只计一次；常量子树不计 | — | 不去重会数成 `{+:6, <<:6, &:5, >>:3}` |
+| `coalesce_flat` | 丢尺寸 1；sᵢ·dᵢ == dᵢ₊₁ 就合并 | `(4,2):(1,4) → (8,):(1,)` | `(32,16):(1,32) → (512,):(1,)` |
+| `hoist(e, 'k')` | simplify 后摊平 +，含 k 的项必须是 k、k·c、k&lt;&lt;n | step = 2 | step = 16（动态 `bk` ），base `{+:3, <<:3, &:3, >>:2}` |
+| 真实 clang（ARM64） | 静态 24 条，0 乘 0 除；动态 22 条，5 个乘类 + 2 个 sdiv；静态 + unsigned 只要 9 条 |  |  |
+
 ## 逐步演示
 
 ::: steps 一个线程的 copy 地址：从 18 个运行时运算到 13 个廉价运算
@@ -82,7 +287,7 @@ e f:b -> d:l "bm 未知" dash
 
 - **colex 写成行主序。** CuTe 的第一个模式变化最快：`idx2crd(i, (4,8,2)) = (i%4, (i//4)%8, i//32)`。测试 `test_idx2crd_colex_last_mode_not_wrapped` 抓这个。
 - **最后一个模式也取模。** CuTe 不对最后一个模式取模，越界的索引沿最后一个 stride 走；`idx2crd(70, (4,8,2))` 是 `(2,1,2)` 而不是 `(2,1,0)`。
-- **fold 只做一遍。** `((x*2)*4)*1` 需要多轮；测试 `test_fold_identities_and_constant_chains`。
+- **fold 不先递归化简孩子。** 规则必须作用在“孩子已经化简过”的节点上：自顶向下只看一次的话，`((x*2)*4)*1` 只会去掉最外层的 `*1`，剩下 `(x*2)*4`。先递归孩子再改写自己（后序），一轮就能得到 `x*8`（图 2）；外面的 while 循环是保证到达不动点的安全网（用这套规则在大量随机表达式上验证过，自底向上一轮之后第二轮不会再变）。测试 `test_fold_identities_and_constant_chains`。
 - **对非 2 的幂也做强度削减。** `x*6` 不能换成移位（可以拆成移位加法，但不在本题规则里）；测试 `test_strength_reduce_only_powers_of_two`。
 - **count_ops 不去重。** idx 在 m 和 kk 里各出现一次，不去重会把静态版本数成 `>>:3`；测试要求 `{+:4, <<:4, &:3, >>:2}`。
 - **以为“除以 2 的幂就是右移”对 C++ int 永远成立。** 本题假设非负；真实 C++ 用有符号 `int`，编译器要插入符号修正（见下面汇编里的 `csel`、`csneg`）。用 `uint32_t` 或让编译器知道值非负，才能得到纯移位。

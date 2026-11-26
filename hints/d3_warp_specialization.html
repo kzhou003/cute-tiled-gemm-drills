@@ -246,7 +246,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <div class="layout has-right">
 <nav class="sidebar" aria-label="nav"><a class="brand" href="../index.html">Tiled GEMM 练习</a>
 <div class="nav-group">领域知识</div>
-<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、五个 track</a>
+<a class="nav-l3" href="../knowledge/overview.html">总览：一条主线、三类抽象、六个 track</a>
+<a class="nav-l3" href="../knowledge/hardware.html">硬件心智模型：汽车工厂类比 + RTX 5090 的真实数字</a>
+<a class="nav-l3" href="../knowledge/execution.html">执行模型：thread、warp、SMSP、CTA 怎样跑起来</a>
+<a class="nav-l3" href="../knowledge/sizing.html">怎样定 CTA / tile / warp 的数量：以 RTX 5090 为例</a>
+<a class="nav-l3" href="../knowledge/tile_dims.html">BM、BN、BK 各管什么：SMEM、GMEM、L2 的约束落在哪一维</a>
+<a class="nav-l3" href="../knowledge/config.html">配置决策：一步一步定下一个 GEMM 配置（含 split-K / Stream-K）</a>
+<a class="nav-l3" href="../knowledge/e2e.html">端到端例子：A[1024×1024] · B[1024×256] 在 RTX 5090 上怎样定配置、怎样运行</a>
 <a class="nav-l3" href="../knowledge/from_scratch.html">从零设计一个 Tiled GEMM：为什么我们会自然地发明这些 Layout</a>
 <a class="nav-l3" href="../knowledge/algebra_compile.html">Layout Algebra 与编译：映射怎样组合，编译器怎样化简</a>
 <a class="nav-l3" href="../knowledge/time_dimension.html">时间维度：TMA、Pipeline、Warp Specialization、PDL</a>
@@ -271,7 +277,13 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <a class="nav-l3" data-id="D4" href="../hints/d4_pdl_chain.html"><span class="nid">D4</span>PDL：两个串联 GEMM 的提前启动、等待位置与正确性检查</a>
 <div class="nav-group">Track E · 完整成熟的 Tiled GEMM</div>
 <a class="nav-l3" data-id="E1" href="../hints/e1_full_gemm.html"><span class="nid">E1</span>完整成熟的 Tiled GEMM：TMA → swizzled SMEM 环形缓冲 → mbarrier 流水线 → warp specialization → epilogue → PDL</a>
-<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a></nav>
+<a class="nav-l3" data-id="E2" href="../hints/e2_config_search.html"><span class="nid">E2</span>选配置：CTA tile、stage 数、cooperative / pingpong 与 swizzle，在硬件约束下用代价模型排序</a>
+<div class="nav-group">Track F · 上机：用真实 CuTe 在 GPU 上写高效 Tiled GEMM（RTX 5090）</div>
+<a class="nav-l3" data-id="F1" href="../hints/f1_simt_cute_gemm.html"><span class="nid">F1</span>第一个真实 CuTe kernel：local_tile + local_partition + SMEM，用 CUDA core（FFMA）算 GEMM</a>
+<a class="nav-l3" data-id="F2" href="../hints/f2_tensorcore_gemm.html"><span class="nid">F2</span>第一个 Tensor Core GEMM：TiledCopy（cp.async 16 B）+ swizzle 过的 SMEM + TiledMMA（mma.sync）</a>
+<a class="nav-l3" data-id="F3" href="../hints/f3_pipelined_gemm.html"><span class="nid">F3</span>多级 cp.async 流水线 + ldmatrix + 寄存器双缓冲：写出 sgemm_sm80 的完整主循环</a>
+<a class="nav-l3" data-id="F4" href="../hints/f4_epilogue_residue.html"><span class="nid">F4</span>边界与 epilogue：M、N 不整除时的谓词加载，α·acc + β·C，FP32 → BF16 写回</a>
+<a class="nav-l3" data-id="F5" href="../hints/f5_config_sweep_splitk.html"><span class="nid">F5</span>在 5090 上扫配置：tile、stage、warp 排列、split-K，用代价模型预测并和 cuBLAS 对比</a></nav>
 <main>
 <header class="cover"><div class="kicker">D3 · Track D · 时间维度：TMA、Pipeline、Warp Specialization、PDL · 55 分钟 · 中</div><h1>D3 · Warp specialization：setmaxnreg 寄存器预算与 Cooperative / Ping-pong 调度</h1><p class="lede">有了 TMA 和 mbarrier 流水线，发搬运指令的线程几乎不干活，却和做 MMA 的线程占着一样多的寄存器。Hopper 的 CUTLASS GEMM 把一个 CTA 拆成 1 个 producer warp group 和 2 个 consumer warp group，用 setmaxnreg 把寄存器从前者挪给后者；两个 consumer 再按 Cooperative 或 Ping-pong 两种方式分工。本题算清这笔寄存器账（为什么恰好是 40 和 232），并模拟两种调度的时间线，找出 Ping-pong 什么时候赢、什么时候反而输。</p><p class="small">文件: <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/mine/d3_warp_specialization.py"><code>mine/d3_warp_specialization.py</code></a> <span class="muted small">你的代码</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/tests/test_d3_warp_specialization.py"><code>tests/test_d3_warp_specialization.py</code></a> <span class="muted small">测试</span> · <a href="https://github.com/kzhou003/cute-tiled-gemm-drills/blob/main/solutions/d3_warp_specialization.py"><code>solutions/d3_warp_specialization.py</code></a> <span class="muted small">参考解</span></p><label class="done-row"><input type="checkbox" id="done-box" data-id="D3"> 我已完成这道题</label></header>
 <h2 id="d3-1">题面速览</h2>
@@ -305,14 +317,261 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <h2 id="d3-3">图解：一个 CTA 的三个 WG</h2>
 
 <figure class="flow"><div class="flow-head">384 线程的分工<span class="flow-hint">悬停节点查看连接</span></div><div class="flow-body" data-flow="{&quot;title&quot;: &quot;384 线程的分工&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;p&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;WG0 Producer&quot;, &quot;s&quot;: &quot;setmaxnreg.dec 40&quot;, &quot;k&quot;: &quot;acc&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;pipe&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;mbarrier 流水线&quot;, &quot;s&quot;: &quot;full / empty × S&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c1&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;WG1 Consumer0&quot;, &quot;s&quot;: &quot;setmaxnreg.inc 232&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;c2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 1.0, &quot;t&quot;: &quot;WG2 Consumer1&quot;, &quot;s&quot;: &quot;setmaxnreg.inc 232&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;tc&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;Tensor Core&quot;, &quot;s&quot;: &quot;MMA：一次一个 WG&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;epi&quot;, &quot;c&quot;: 4.0, &quot;r&quot;: 0.5, &quot;t&quot;: &quot;Epilogue&quot;, &quot;s&quot;: &quot;写回：一次一个 WG&quot;, &quot;k&quot;: &quot;dark&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;p&quot;, &quot;b&quot;: &quot;pipe&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;pipe&quot;, &quot;b&quot;: &quot;c1&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;pipe&quot;, &quot;b&quot;: &quot;c2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c1&quot;, &quot;b&quot;: &quot;tc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;c2&quot;, &quot;b&quot;: &quot;tc&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;tc&quot;, &quot;b&quot;: &quot;epi&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 190.0, &quot;rh&quot;: 100.0, &quot;nw&quot;: 168.0}}"></div><figcaption>寄存器账：128 × (40 + 232 + 232) = 64512 = 168 × 384。Ping-pong 里 WG1 和 WG2 交替占用 Tensor Core 和 epilogue；Cooperative 里两者同时做同一件事。</figcaption></figure>
-<h2 id="d3-4">逐步演示</h2>
+<h2 id="d3-4">从小例子开始：先在草稿纸上手算</h2>
+<p>这道题有两本账：寄存器账（函数 <code>launch_regs_per_thread</code> 、<code>validate_setmaxnreg</code> 、<code>register_plan</code> 、<code>accumulator_regs</code> ）和时间账（<code>schedule_cooperative</code> 、<code>schedule_pingpong</code> 、<code>steady_per_tile</code> ）。两本账都先用能写满一张纸的小数字算一遍，再换成测试里的数字，最后写成一般公式。</p>
+<h3 id="d3-4-1">寄存器账：从“每线程几个”到“整个 CTA 几个”</h3>
+<p>① 小：只看“每线程”这一列</p>
+<p>先不乘 128。三个 WG 启动时每线程都是 168，重分配后是 40、232、232。</p>
+<pre><code>启动：168 + 168 + 168 = 504
+之后：40 + 232 + 232 = 504   ✓ 一样多
+producer 让出 168−40 = 128
+两个 consumer 各要 232−168 = 64
+</code></pre>
+<p>② 测试的默认例子：384 线程，40 / 232</p>
+<p>每个 WG 有 128 个线程，所以把 ① 的每个数乘 128。</p>
+<pre><code>launch_total = 168 × 384 = 64512
+final_total  = 128 × 504 = 64512
+freed = 128 × 128 = 16384
+needed = 2 × 128 × 64 = 16384
+</code></pre>
+<p>③ 边界：混用 40 / 240，以及 3 个 consumer 每线程那一列一旦超过 504（或 4 × 128 = 512），就越界了。</p>
+<pre><code>40 + 240 + 240 = 520 &gt; 504 → E_BUDGET
+512 线程：launch = 128
+24 + 3x ≤ 512 → x ≤ 162.67 → 160
+</code></pre>
+<p>④ 一般</p>
+<p>把 ①–③ 写成公式。</p>
+<pre><code>launch = ⌊65536 / threads / 8⌋ × 8
+目标值 % 8 == 0 且 24 ≤ 目标值 ≤ 256
+load ≤ launch ≤ mma
+Σ 每个 WG 的目标值 ≤ WG 数 × launch
+</code></pre>
+<p><strong>✎</strong> 草稿纸 1：384 线程（1 个 producer + 2 个 consumer）的寄存器账</p>
+<pre><code class="language-text">1) 启动时每线程几个？  65536 / 384 = 170.67 → 取整 170 → 按 8 对齐：170 // 8 = 21，21 × 8 = 168
+   启动时整个 CTA 分到：168 × 384 = 64512        （SM 上还剩 65536 − 64512 = 1024 个没分出去）
+2) 检查目标值：40 % 8 = 0 ✓   24 ≤ 40 ≤ 256 ✓      232 % 8 = 0 ✓   24 ≤ 232 ≤ 256 ✓
+   方向：producer 用 dec，40 ≤ 168 ✓；consumer 用 inc，232 ≥ 168 ✓
+3) 按 WG 记账（每 WG 128 线程）
+           WG0 producer   168 → 40     放出 (168 − 40) × 128 = 128 × 128 = 16384
+           WG1 consumer   168 → 232    取走 (232 − 168) × 128 =  64 × 128 =  8192
+           WG2 consumer   168 → 232    取走 (232 − 168) × 128 =  64 × 128 =  8192
+   freed = 16384      needed = 8192 + 8192 = 16384      → 刚好放出多少就用掉多少
+4) 总量：final_total = 128 × (1·40 + 2·232) = 128 × 504 = 64512 ≤ 64512 ✓   → ok =
+True，errors = []
+5) 换成 40 / 240：  128 × (40 + 240 + 240) = 128 × 520 = 66560 &gt; 64512 ✗
+   → errors = ['E_BUDGET: final 66560 registers &gt; launch allocation 64512']
+   换成 24 / 240：  128 × (24 + 240 + 240) = 128 × 504 = 64512 ✓      （CUTLASS 的“重负载”配置）
+6) 累加器：tile 128×128，fp32，每元素 1 个寄存器，共 16384 个
+   Cooperative：256 个线程分  → 16384 / 256 = 64 个/线程
+   Ping-pong  ：128 个线程独占 → 16384 / 128 = 128 个/线程     （都在 232 以内；≥ 208 才换成 24 / 240）
+</code></pre>
+<h3 id="d3-4-2">时间账：2 个 tile，两种调度各画一遍</h3>
+<p>取 <code>M = 3</code> （一个 tile 的 MMA 时间）、<code>E = 2</code> （一个 WG 写回一整个 tile 的时间）、<code>n = 2</code> 个 tile。草稿纸上横轴是时间，每格 1 个单位，每行是一个 WG。</p>
+<p>① 小：n = 2，M = 3，E = 2</p>
+<p>每个时间格都能写出来。结果两种调度一样长。</p>
+<pre><code>Cooperative：(3 + 1) × 2 = 8
+Ping-pong  ：3 + 2 + 1 × 3 = 8
+→ 只有 2 个 tile 时 Ping-pong 没赢
+</code></pre>
+<p>② 测试的例子：M = 10，E = 4</p>
+<p>tile 多了以后差距才出来。</p>
+<pre><code>n = 4：Coop 48，Ping-pong 44
+n = 8：Coop 96，Ping-pong 84
+利用率 0.833 对 0.952
+</code></pre>
+<p>③ 边界：E &gt; 2M（M = 4，E = 20）</p>
+<p>epilogue 太长，Ping-pong 的 epilogue 链成了瓶颈。</p>
+<pre><code>每 tile：Coop 4 + 10 = 14
+        Ping-pong max(4, 20) = 20
+n = 4：Coop 56，Ping-pong 84
+</code></pre>
+<p>④ 一般</p>
+<p>（已对 n ≤ 11、M ≤ 14、E ≤ 39 全部核对过参考解）</p>
+<pre><code>Coop：makespan = n·(M + E/2)
+PP  ：makespan = M + E + (n−1)·max(M, E)
+稳态每 tile：M + E/2 对 max(M, E)
+PP 不慢 ⇔ E ≤ 2M
+</code></pre>
+<p><strong>✎</strong> 草稿纸 2：n = 2，M = 3，E = 2</p>
+<pre><code class="language-text">── Cooperative：两个 WG 一起算同一个 tile，一起写回（各写一半，E/2 = 1）──
+   tile 0：mma [0, 3)       两个 WG 都在这一段         epi [3, 4)  两个 WG 各写一半
+   tile 1：mma 从上一个 epi 结束开始 = 4 → [4, 7)      epi [7, 8)
+   t        0  1  2  3  4  5  6  7        ← 第 t 格 = 时间 [t, t+1)
+   WG1      M0 M0 M0 E0 M1 M1 M1 E1
+   WG2      M0 M0 M0 E0 M1 M1 M1 E1
+   TC       ## ## ## .. ## ## ## ..        ← 写回时 Tensor Core 空着
+   makespan = 8，tensor_core_busy = 2 × 3 = 6，utilization = 6 / 8 = 0.75
+   segments 共 8 条：(1,mma,0,0,3) (2,mma,0,0,3) (1,epi,0,3,4) (2,epi,0,3,4)
+(1,mma,1,4,7) ...
+── Ping-pong：tile j 归 WG 1 + j%2，每个 WG 独自写回整个 tile（E = 2）──
+   tile 0 → WG1： mma_start = max(mma_end[−1], epi_end[−2]) = max(0, 0) = 0     → mma [0, 3)
+                  epi_start = max(mma_end[0], epi_end[−1])  = max(3, 0) = 3     → epi [3, 5)
+   tile 1 → WG2： mma_start = max(mma_end[0], epi_end[−1])  = max(3, 0) = 3     → mma [3, 6)
+                  epi_start = max(mma_end[1], epi_end[0])   = max(6, 5) = 6     → epi [6, 8)
+   t        0  1  2  3  4  5  6  7        ← 第 t 格 = 时间 [t, t+1)
+   WG1      M0 M0 M0 E0 E0 .. .. ..
+   WG2      .. .. .. M1 M1 M1 E1 E1
+   TC       ## ## ## ## ## ## .. ..        ← 中间不停，但最后一个 epi（2 格）露在外面
+   makespan = 8，utilization = 6 / 8 = 0.75
+   segments 按 (start, wg) 排序：(1,mma,0,0,3) (1,epi,0,3,5) (2,mma,1,3,6)
+(2,epi,1,6,8)
+── 结论：一样长。Cooperative 每个 tile 露出 E/2 = 1，共 2；Ping-pong 只露出最后一个 E = 2。
+   再加 tile：n = 3 → 12 对 11；n = 4 → 16 对 14。每多一个 tile，Coop 多 M + E/2 = 4，PP多 max(M, E) = 3。
+</code></pre>
+<p>下面这张图可以任意改小参数（n ≤ 6、M ≤ 8、E ≤ 12）。每个时间格里写的是 M + tile 号（MMA）或 E + tile 号（epilogue）。把鼠标停在一段上，面板会写出这一段的起点是由哪两个 <code>max</code> 项决定的（被依赖的两段会加粗框出）；移开鼠标，面板打印两个函数的完整返回值。先对照上面的草稿纸，再把 n 改成 3、4，或者把 E 拉到 7 以上（E &gt; 2M）看看谁更快。</p>
+
+<figure class="flow snap"><div class="flow-head">手算草稿 · 两种调度的逐格时间线</div><img src="../figs/d3/d3_new-01.png" alt="手算草稿 · 两种调度的逐格时间线" loading="lazy" style="width:100%;aspect-ratio:1461/1293"></figure>
+<h2 id="d3-5">图解详解：寄存器预算与两种调度</h2>
+
+<div class="callout info"><div class="callout-title">关于这一节的图</div><p>这些图是交互版讲解页的静态快照，显示的是默认参数下的状态。文中提到的按钮、滑块和悬停提示在这里不能操作；图上的数字和下方的文字、表格、黑底面板说的是同一组值，可以直接对照你的函数输出。</p>
+</div>
+<p>这一节有四张可交互的图，每张对应一组要实现的函数。整道题等于下面这段伪代码里的“算账”部分：</p>
+<pre><code>plan = register_plan(load_wgs=1, load_regs=40, mma_wgs=2, mma_regs=232)   # 图 1：kernel 开
+acc  = accumulator_regs(128, 128, 256 if cooperative else 128)            # 图 2：一个 cons
+s    = schedule_cooperative(n, M, E) or schedule_pingpong(n, M, E)        # 图 3：持久化 CTA
+per  = steady_per_tile(kind, M, E)                                        # 图 4：tile 很多
+</code></pre>
+<h3 id="d3-5-1">图 1 · 寄存器预算条：<code>launch_regs_per_thread</code> / <code>validate_setmaxnreg</code> /</h3>
+<p><code>register_plan</code></p>
+<p>先看启动寄存器 <code>launch_regs_per_thread</code> ：编译器把 65536 均分给每个线程，再向下对齐到 8 的倍数。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th><code>threads</code></th>
+<th><code>WG</code> 数</th>
+<th><code>65536 / threads</code></th>
+<th><code>// 8 × 8</code></th>
+<th><code>launch_total</code></th>
+<th>没分出去</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>128</code></td>
+<td><code>1</code></td>
+<td><code>512</code></td>
+<td><code>512*</code></td>
+<td><code>65536</code></td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>256</code></td>
+<td><code>2</code></td>
+<td><code>256</code></td>
+<td><code>256</code></td>
+<td><code>65536</code></td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>384</code></td>
+<td><code>3</code></td>
+<td><code>170.67</code></td>
+<td><code>168</code></td>
+<td><code>64512</code></td>
+<td><code>1024</code></td>
+</tr>
+<tr>
+<td><code>512</code></td>
+<td><code>4</code></td>
+<td><code>128</code></td>
+<td><code>128</code></td>
+<td><code>65536</code></td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><code>640</code></td>
+<td><code>5</code></td>
+<td><code>102.4</code></td>
+<td><code>96</code></td>
+<td><code>61440</code></td>
+<td><code>4096</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>* 只是本题公式的值。真实硬件每线程最多 255 个寄存器，128 线程的 kernel 分不到 512 个；这道题只用到 256 线程及以上的情况。</p>
+<p>下面的图把整个 SM 的 65536 个寄存器画成一根横条。第一根是启动时每个 WG 拿到的（都是 launch × 128）；第二根是 setmaxnreg 之后。竖虚线是启动时分到的总数 launch_total：第二根条超过它就是 <code>E_BUDGET</code> （红色斜线）。下方的柱子是“每线程”视角：虚线是 launch，柱高是目标值，箭头向下是 dec（放出），向上是 inc（取走）。拖滑块（步长 4，所以也能拖到不是 8 的倍数的值），看错误码怎样出现。</p>
+
+<figure class="flow snap"><div class="flow-head">register_plan(load_wgs, load_regs, mma_wgs, mma_regs)</div><img src="../figs/d3/d3_new-02.png" alt="register_plan(load_wgs, load_regs, mma_wgs, mma_regs)" loading="lazy" style="width:100%;aspect-ratio:1461/1375"></figure>
+<p>源码对照：<code>setmaxnreg</code> 只是两行内联 PTX，见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/arch/reg_reconfig.h#L81-L95">warpgroup_reg_alloc / warpgroup_reg_dealloc</a> ；两份 kernel 各在 producer 分支开头 dec（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L562">cooperative L562</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L577">pingpong L577</a> ），在 consumer 分支开头 inc（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L770-L772">cooperative L772</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L805">pingpong L805</a> ）。指令本身的规则（8 的倍数、[24, 256]、整个 warp group 一起执行）见 PTX ISA 的 <a href="https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#miscellaneous-instructions-setmaxnreg">setmaxnreg</a> 一节。</p>
+<h3 id="d3-5-2">图 2 · 累加器住在哪：<code>accumulator_regs</code></h3>
+<p>consumer 需要 232 个寄存器，主要是为了放累加器。一个 tile_m × tile_n 的 fp32 tile 共有 tile_m·tile_n 个累加器，平均分给参与 MMA 的线程。Cooperative 的 TiledMMA 用 256 线程（两个 WG 沿 M 各分一半），Ping-pong 一个 WG（128 线程）独占整个 tile。右边的柱子是一个 consumer 线程的 232 个寄存器里，累加器占了多少。</p>
+
+<figure class="flow snap"><div class="flow-head">accumulator_regs(tile_m, tile_n, threads)</div><img src="../figs/d3/d3_new-03.png" alt="accumulator_regs(tile_m, tile_n, threads)" loading="lazy" style="width:100%;aspect-ratio:1461/972"></figure>
+<p>源码对照：kernel 里的同一个公式是 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L131-L151">RegsPerThread 与 HeavyRegisterPressure</a> （≥ 208 改用 24 / 240）；Cooperative 沿 M 切成两半来自 builder 的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl#L252-L256">AtomLayoutMNK = 2×1×1</a> ，kernel 还用 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L373-L375">static_assert</a> 要求 256 线程、tile_m ≥ 128。</p>
+<h3 id="d3-5-3">图 3 · 两种调度的甘特图：<code>schedule_cooperative</code> / <code>schedule_pingpong</code></h3>
+<p>换成测试的数字（默认 M = 10、E = 4、n = 4）。上半是 Cooperative，下半是 Ping-pong；每块的第三行是 Tensor Core。点“▶ 播放”，竖线沿时间走，面板告诉你此刻每个 WG 在干什么、有序屏障在等谁。要看的三件事：</p>
+<ul>
+<li>Cooperative 的 Tensor Core 行每个 tile 之后都有一段 E/2 的空闲；Ping-pong 的 Tensor Core 行在 E ≤ M 时连成一片，只在最后露出一个 E。</li>
+<li>Ping-pong 里同一个 WG 的段从不重叠：WG1 的 tile 2 必须等它自己写完 tile 0（<code>epi_end[j−2]</code> ），因为累加器寄存器还占着。</li>
+<li>切到 E = 16 或 E = 20：Ping-pong 的 MMA 开始“等 epilogue”，Tensor Core 行出现空洞，瓶颈从 MMA 链换成了 epilogue 链。</li>
+</ul>
+
+<figure class="flow snap"><div class="flow-head">schedule_cooperative / schedule_pingpong</div><img src="../figs/d3/d3_new-04.png" alt="schedule_cooperative / schedule_pingpong" loading="lazy" style="width:100%;aspect-ratio:1461/1030"></figure>
+<p>Ping-pong 里那两个 <code>max</code> 就是有序屏障的两次 <code>wait</code> ：MMA 前的 <code>wait</code> 等另一个 WG 把 stage 0（MMA 位）交过来，epilogue 前的 <code>wait</code> 等另一个 WG 把 stage 1（epilogue 位）交过来；而“等自己上一个 tile 写完”是同一个 WG 的代码顺序自然保证的。对照 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L155-L158">StagesPerMathWarpGroup = 2</a> 、<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L497-L501">group_id = WG 号 − Consumer0</a> ，以及 kernel 里的 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L851-L878">MMA 段的 wait / arrive</a> 和 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L900-L937">epilogue 段的 wait / arrive</a> 。Cooperative 没有这个屏障：两个 WG 在同一段代码里一起走（<a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L791-L845">mma 之后紧跟 epilogue.store</a> ）。三种 kernel 设计的官方说明见 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/media/docs/cpp/efficient_gemm.md#L231-L250">efficient_gemm.md 的 Hopper Warp Specialization 一节</a>。</p>
+<h3 id="d3-5-4">图 4 · 稳态每 tile：<code>steady_per_tile</code> ，以及 E = 2M 的交叉点</h3>
+<p>tile 很多时，makespan ≈ n × 每 tile 时间。横轴是 E，纵轴是每 tile 的时间：Cooperative 是一条斜率 1/2 的直线 <code>M +</code> <code>E/2</code> ；Ping-pong 先平（<code>M</code> ，MMA 链是瓶颈）再以斜率 1 上升（<code>E</code> ，epilogue 链是瓶颈）。两条线在 E = 2M 相交。圆点是直接跑模拟得到的 <code>(makespan(n+2) − makespan(n)) / 2</code> （n = 6），应当正好落在线上——这就是 hint 2 里建议你自己做的验证。</p>
+
+<figure class="flow snap"><div class="flow-head">steady_per_tile(kind, M, E)</div><img src="../figs/d3/d3_new-05.png" alt="steady_per_tile(kind, M, E)" loading="lazy" style="width:100%;aspect-ratio:1461/905"></figure>
+<h3 id="d3-5-5">速查</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>函数</th>
+<th>公式</th>
+<th>默认例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>launch_regs_per_thread (t)</code></td>
+<td>(65536 // t) // 8 × 8</td>
+<td>384 → 168，512 → 128</td>
+</tr>
+<tr>
+<td><code>validate_setmaxnreg(c)</code></td>
+<td>c % 8 ≠ 0 → E_NREG_MULT8；c 不在 [24, 256] 内 → E_NREG_RANGE（两条可以同时出现）</td>
+<td>44 → MULT8；16 → RANGE</td>
+</tr>
+<tr>
+<td><code>register_plan(...)</code></td>
+<td>threads = 128·(L+C)；launch_total = launch·threads；final = 128·(L·l + C·c)；freed = 128·L·(launch − l)；needed = 128·C·(c −launch)；错误顺序 MULT8/RANGE(l) → MULT8/RANGE(c) → DEALLOC_ABOVE → ALLOC_BELOW → BUDGET</td>
+<td>64512 / 64512/ 16384 /16384，ok</td>
+</tr>
+<tr>
+<td><code>accumulator_regs(m, n, t)</code></td>
+<td>m·n // t</td>
+<td>128×128：Coop 64，PP 128</td>
+</tr>
+<tr>
+<td><code>schedule_cooperative</code></td>
+<td>t 游标：mma [t, t+M] ×2 WG，epi [t+M, t+M+E/2] ×2 WG；makespan = n·(M + E/2)</td>
+<td>(4, 10, 4) → 48</td>
+</tr>
+<tr>
+<td><code>schedule_pingpong</code></td>
+<td>wg = 1 + j%2；s = max(mma_end[j−1], epi_end[j−2])；e = max(mma_end[j], epi_end[j−1])；makespan = M + E + (n−1)·max(M,E)</td>
+<td>(4, 10, 4) → 44</td>
+</tr>
+<tr>
+<td>共同收尾</td>
+<td>按 (start, wg) 稳定排序；busy = n·M；utilization = busy / makespan（makespan = 0 时为 0）</td>
+<td>(8, 10, 4)：0.833 / 0.952</td>
+</tr>
+<tr>
+<td><code>steady_per_tile</code></td>
+<td>cooperative → M + E/2；pingpong → max(M, E)；其它 → ValueError</td>
+<td>(10, 16)：18.0 /16</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="d3-6">逐步演示</h2>
 
 <div class="stepper"><div class="st-head"><span class="st-title">▶ M = 10，E = 4 的 Ping-pong，4 个 tile</span><span class="st-count"></span><span class="st-ctrl"><button type="button" class="btn st-play" data-play="▶ 自动播放" data-pause="❚❚ 暂停">▶ 自动播放</button><button type="button" class="btn st-prev">← 上一步</button><button type="button" class="btn primary st-next">下一步 →</button></span></div><div class="st-dots"></div><div class="st-diagram"><figure class="flow"><div class="flow-body" data-flow="{&quot;title&quot;: &quot;&quot;, &quot;nodes&quot;: [{&quot;id&quot;: &quot;t0&quot;, &quot;c&quot;: 0.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;WG1 · tile 0&quot;, &quot;s&quot;: &quot;MMA 0–10&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;t1&quot;, &quot;c&quot;: 1.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;WG2 · tile 1&quot;, &quot;s&quot;: &quot;MMA 10–20&quot;, &quot;k&quot;: &quot;teal&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;t2&quot;, &quot;c&quot;: 2.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;WG1 · tile 2&quot;, &quot;s&quot;: &quot;MMA 20–30&quot;, &quot;k&quot;: &quot;pass&quot;, &quot;w&quot;: 1.0}, {&quot;id&quot;: &quot;st&quot;, &quot;c&quot;: 3.0, &quot;r&quot;: 0.0, &quot;t&quot;: &quot;稳态&quot;, &quot;s&quot;: &quot;每 tile 10&quot;, &quot;k&quot;: &quot;vio&quot;, &quot;w&quot;: 1.0}], &quot;edges&quot;: [{&quot;a&quot;: &quot;t0&quot;, &quot;b&quot;: &quot;t1&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t1&quot;, &quot;b&quot;: &quot;t2&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}, {&quot;a&quot;: &quot;t2&quot;, &quot;b&quot;: &quot;st&quot;, &quot;t&quot;: &quot;&quot;, &quot;k&quot;: &quot;&quot;, &quot;anim&quot;: false, &quot;dash&quot;: false}], &quot;groups&quot;: [], &quot;cfg&quot;: {&quot;cw&quot;: 200.0, &quot;rh&quot;: 80.0, &quot;nw&quot;: 170.0}}"></div></figure></div><div class="st-body"><div class="step" data-hl="t0"><div class="step-title">1. t = 0–10：WG1 算 tile 0</div><p><code>OrderedSequenceBarrier</code> 的 group 0 从相反的 phase 起步，所以 WG1 的第一次 wait 立即通过；WG2 的 wait 要等 WG1 arrive。段：<code>(1, mma, 0, 0, 10)</code>。</p>
 </div><div class="step" data-hl="t0,t1"><div class="step-title">2. t = 10–20：WG2 算 tile 1，WG1 写回 tile 0</div><p>WG1 在 10 时 arrive（把 MMA 位交给 WG2），然后做 epilogue <code>(1, epi, 0, 10, 14)</code>；同时 WG2 <code>(2, mma, 1, 10, 20)</code>。Tensor Core 没有停。</p>
 </div><div class="step" data-hl="t1,t2"><div class="step-title">3. t = 20–30：WG1 回来算 tile 2</div><p>tile 2 的 MMA 要同时等“tile 1 的 MMA 结束”（20）和“WG1 自己写完 tile 0”（14）：<code>max(20, 14) = 20</code>。WG2 在 20–24 写回 tile 1。</p>
 </div><div class="step" data-hl="t2,st"><div class="step-title">4. 稳态</div><p>4 个 tile 的 makespan 44，Tensor Core 忙 40。8 个 tile 时 Ping-pong 84、Cooperative 96（每 tile 10 + 4/2 = 12），利用率 0.952 对 0.833。E = 10 时是 90 对 120；E = 16 时 epilogue 链成为瓶颈，每 tile 16，仍略胜 Cooperative 的 18（138 对 144）。</p>
 </div></div></div>
-<h2 id="d3-5">易错点</h2>
+<h2 id="d3-7">易错点</h2>
 <ul>
 <li><strong>以为 setmaxnreg 能凭空多出寄存器。</strong> inc 只能拿走 dec 放回池子的部分。40 / 240 混用需要 18432 个却只放出 16384 个：<code>E_BUDGET: final 66560 registers &gt; launch allocation 64512</code>。测试 <code>test_register_plan_errors</code>。</li>
 <li><strong>启动寄存器不按 8 取整。</strong> 65536 / 384 = 170.67，实际只有 168；按 170 算账就对不上。测试 <code>test_launch_regs_round_down_to_8</code>。</li>
@@ -321,12 +580,12 @@ svg.f-step .f-node.hl rect.f-box { stroke: var(--hl); stroke-width: 3; }
 <li><strong>把 Ping-pong 的稳态写成 (M + E) / 2。</strong> 那只是单个 WG 的约束。epilogue 也被有序屏障串起来，所以还要不小于 E：稳态是 <code>max(M, E)</code>。测试 <code>test_cooperative_wins_when_epilogue_is_long</code>。</li>
 <li><strong>只让 MMA 交替、忘了同一个 WG 要先写完上一个 tile。</strong> tile j 的 MMA 必须等 <code>epi_end[j−2]</code>：累加器寄存器还被上一个 tile 占着。测试 <code>test_pingpong_invariants_on_random_inputs</code> 检查一个 WG 的各段互不重叠。</li>
 </ul>
-<h2 id="d3-6">对照文档</h2>
+<h2 id="d3-8">对照文档</h2>
 <blockquote>
 <p>“例如一个 warp group 负责 TMA load（producer），其他 warp group 负责 MMA（consumer）。这种分工可以减少搬运和计算之间的资源竞争，并让异步执行更清晰。这里增加的不只是新的 Layout：还需要角色分配、pipeline 状态、barrier、warp-group 同步以及架构特定的指令语义。”</p>
 </blockquote>
 <p>文档说的“资源竞争”，最具体的一项就是寄存器：本题把它量化成 64512 这笔账。“warp-group 同步”在 Ping-pong 里是 MMA 和 epilogue 两条有序链；“架构特定的指令语义”是 <code>setmaxnreg</code> 的 8 对齐、[24, 256] 范围和 inc / dec 的方向。</p>
-<h2 id="d3-7">真实代码</h2>
+<h2 id="d3-9">真实代码</h2>
 <p>寄存器常数（简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L147">pingpong kernel</a>，Cooperative 的常数相同）：</p>
 <pre><code class="language-cpp">static_assert(NumMMAThreads == 128, &quot;Pingpong kernel must have TiledMMA operating using 128 threads.&quot;);
 static_assert(MaxThreadsPerBlock == 384, &quot;Pingpong kernel must have 384 threads in total.&quot;);
@@ -349,14 +608,37 @@ static constexpr uint32_t MmaRegisterRequirement = !HeavyRegisterPressure ? 232 
 }
 </code></pre>
 <p>有序屏障的关键：group 0 从相反的 phase 起步（“Group 0 starts with an opposite phase”），<code>arrive()</code> 通知 <code>(group_id + 1) % Length</code> 后 <code>++stage_</code>。<code>SequenceDepth = 2</code> 的两个 stage 正好是“MMA”和“epilogue”，所以两条链各自交替。</p>
-<h2 id="d3-8">上机验证</h2>
+<h2 id="d3-10">真实代码</h2>
+<p>寄存器常数，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L139-L148">pingpong kernel</a> （Cooperative 在 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_cooperative.hpp#L146-L151">L146–151</a> ，常数相同）：</p>
+<pre><code>static_assert(NumMMAThreads == 128, &quot;Pingpong kernel must have TiledMMA operating using 12
+static_assert(MaxThreadsPerBlock == 384, &quot;Pingpong kernel must have 384 threads in total.&quot;
+static constexpr int RegsPerThread = (TileM * TileN * sizeof(ElementAccumulator)) / (NumMM
+static constexpr bool HeavyRegisterPressure = RegsPerThread &gt;= 208;
+static constexpr uint32_t LoadRegisterRequirement = !HeavyRegisterPressure ? 40 : 24;
+static constexpr uint32_t MmaRegisterRequirement  = !HeavyRegisterPressure ? 232 : 240;
+</code></pre>
+<p><code>RegsPerThread</code> 就是本题的 <code>accumulator_regs</code> 。角色分派和两条有序链，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp#L576-L937">pingpong operator()</a> ：</p>
+<pre><code>if (warp_group_role == WarpGroupRole::Producer) {
+  cutlass::arch::warpgroup_reg_dealloc&lt;LoadRegisterRequirement&gt;();   // setmaxnreg.dec 40
+  ...                                                                // TMA 发射、调度器、ep
+} else {                                                             // Consumer0 / Consum
+  cutlass::arch::warpgroup_reg_alloc&lt;MmaRegisterRequirement&gt;();      // setmaxnreg.inc 232
+  while (work_tile_info.is_valid()) {
+    math_wg_order_barrier.wait();   collective_mainloop.mma(...);     math_wg_order_barrie
+    math_wg_order_barrier.wait();   collective_epilogue.store(...);   math_wg_order_barrie
+    ...                             // 跳到下一个属于自己的 tile（隔一个）
+  }
+}
+</code></pre>
+<p>有序屏障的两个关键行，简化自 <a class="src" href="https://github.com/NVIDIA/cutlass/blob/af951046cd9cac9301d8e3e90863fd8d7edc9fa9/include/cutlass/pipeline/sm90_pipeline.hpp#L1281-L1372">OrderedSequenceBarrier</a> ：<code>stage_({0, params.group_id == 0, 0})</code> （“Group 0 -starts with an opposite phase”），以及 <code>arrive()</code> 通知 <code>(group_id + 1) % Length</code> 后 <code>++stage_</code> 。<code>SequenceDepth =</code> <code>2</code> 的两个 stage 正好是 “MMA” 和 “epilogue”，所以两条链各自交替。</p>
+<h2 id="d3-11">上机验证</h2>
 <p>这道题没有 C++ oracle：kernel 和有序屏障都离不开 GPU（<code>setmaxnreg</code>、mbarrier 是 PTX），CPU 上编译不出可运行的程序。所以期望值来自源码里的常数（上面引用的行）和本题的时间模型。</p>
 <pre><code class="language-bash">DRILL_IMPL=solutions python3 -c &quot;from drill import load; m = load('d3_warp_specialization'); print(m.register_plan())&quot;
 grep -n &quot;RegisterRequirement\|math_wg_order_barrier\.\|warpgroup_reg_&quot; \
   third_party/cutlass/include/cutlass/gemm/kernel/sm90_gemm_tma_warpspecialized_pingpong.hpp
 </code></pre>
 <p>有 Hopper（SM90）GPU 时，用 <code>cuobjdump -sass</code> 看 CUTLASS 的 warp-specialized kernel，应当能找到 <code>setmaxnreg</code> 对应的 SASS 指令，<code>cuobjdump -res-usage</code> 报告的寄存器数应当是 168；用 Nsight Compute 对比 <code>KernelTmaWarpSpecializedCooperative</code> 与 <code>KernelTmaWarpSpecializedPingpong</code> 的 Tensor Core 利用率，可以检验本题的时间模型（这两点本机没有 GPU，未核对）。RTX 5090 是 SM120，不支持 WGMMA；在它上面跑的是另一套 Blackwell 消费级的 kernel，<code>setmaxnreg</code> 的账也要按那套 kernel 重算。</p>
-<h2 id="d3-9">三级提示</h2>
+<h2 id="d3-12">三级提示</h2>
 
 <details class="hint l1"><summary><span class="lvl">L1</span>I/O 例子和关键问题<span class="spoiler-note">方向（轻度剧透）</span></summary><div class="body"><pre><code class="language-python">launch_regs_per_thread(384), launch_regs_per_thread(512)   # (168, 128)
 register_plan(load_regs=40, mma_regs=240)[&quot;errors&quot;]        # ['E_BUDGET: final 66560 registers &gt; launch allocation 64512']
@@ -390,7 +672,7 @@ steady_per_tile(&quot;pingpong&quot;, 10, 16), steady_per_tile(&quot;cooperative
 <li>Ping-pong 每 tile <code>max(M, E)</code>，Cooperative 每 tile <code>M + E/2</code>。<code>max(M, E) ≤ M + E/2</code> 当且仅当 <code>E ≤ 2M</code>：epilogue 不超过 MMA 的两倍时 Ping-pong 不慢，E ≤ M 时 epilogue 被完全藏住。E &gt; 2M（很小的 K、很重的 epilogue fusion）时 Cooperative 更快。E = 0 时两者相同。</li>
 </ol>
 </div></details></div></details>
-<h2 id="d3-10">参考解</h2>
+<h2 id="d3-13">参考解</h2>
 
 <details class="solution"><summary><span class="lvl">✓</span>solutions/d3_warp_specialization.py<span class="spoiler-note">先自己写完、跑过测试再看</span></summary><div class="body"><div class="codebox"><div class="code-head"><span class="path">solutions/d3_warp_specialization.py</span><span class="muted small">158 行</span><button type="button" class="btn copy">复制</button></div><pre><code class="language-python">&quot;&quot;&quot;D3 · Warp specialization：寄存器重分配预算、Cooperative 与 Ping-pong 两种调度的时间线— reference solution.
 
@@ -550,7 +832,7 @@ def steady_per_tile(kind: str, mainloop: float, epilogue: float) -&gt; float:
         # 两条独立的有序链：MMA 链（Tensor Core）和 epilogue 链。每个 WG 自己的 (M + E) /2 永远不超过 max(M, E)。
         return max(mainloop, epilogue)
     raise ValueError(f&quot;unknown schedule kind {kind!r}&quot;)</code></pre></div></div></details>
-<h2 id="d3-11">面试官追问 &amp; 对照源码</h2>
+<h2 id="d3-14">面试官追问 &amp; 对照源码</h2>
 <ul>
 <li>Producer WG 的 4 个 warp 各干什么？对照 pingpong kernel 里的 <code>WarpGroupRole</code> / <code>ProducerWarpRole</code>：Mainloop 发 A/B 的 TMA，另一个 warp 跑 tile 调度器，Epilogue 发 C 的 TMA load。</li>
 <li>本题假设 TMA 总能跟上。如果 D2 的流水线 stage 不够，Ping-pong 的两个 consumer 抢同一条流水线，会怎样？（提示：Ping-pong 的 <code>mainloop_pipe_consumer_state.advance(k_tile_count * NumMmaWarpGroups)</code> 跳过了另一个 WG 用掉的 stage。）</li>
@@ -564,14 +846,24 @@ def steady_per_tile(kind: str, mainloop: float, epilogue: float) -&gt; float:
 <a class="o2" href="#d3-1">题面速览</a>
 <a class="o2" href="#d3-2">直觉与类比</a>
 <a class="o2" href="#d3-3">图解：一个 CTA 的三个 WG</a>
-<a class="o2" href="#d3-4">逐步演示</a>
-<a class="o2" href="#d3-5">易错点</a>
-<a class="o2" href="#d3-6">对照文档</a>
-<a class="o2" href="#d3-7">真实代码</a>
-<a class="o2" href="#d3-8">上机验证</a>
-<a class="o2" href="#d3-9">三级提示</a>
-<a class="o2" href="#d3-10">参考解</a>
-<a class="o2" href="#d3-11">面试官追问 &amp; 对照源码</a></aside>
+<a class="o2" href="#d3-4">从小例子开始：先在草稿纸上手算</a>
+<a class="o3" href="#d3-4-1">寄存器账：从“每线程几个”到“整个 CTA 几个”</a>
+<a class="o3" href="#d3-4-2">时间账：2 个 tile，两种调度各画一遍</a>
+<a class="o2" href="#d3-5">图解详解：寄存器预算与两种调度</a>
+<a class="o3" href="#d3-5-1">图 1 · 寄存器预算条：launch_regs_per_thread / validate_setmaxnreg /</a>
+<a class="o3" href="#d3-5-2">图 2 · 累加器住在哪：accumulator_regs</a>
+<a class="o3" href="#d3-5-3">图 3 · 两种调度的甘特图：schedule_cooperative / schedule_pingpong</a>
+<a class="o3" href="#d3-5-4">图 4 · 稳态每 tile：steady_per_tile ，以及 E = 2M 的交叉点</a>
+<a class="o3" href="#d3-5-5">速查</a>
+<a class="o2" href="#d3-6">逐步演示</a>
+<a class="o2" href="#d3-7">易错点</a>
+<a class="o2" href="#d3-8">对照文档</a>
+<a class="o2" href="#d3-9">真实代码</a>
+<a class="o2" href="#d3-10">真实代码</a>
+<a class="o2" href="#d3-11">上机验证</a>
+<a class="o2" href="#d3-12">三级提示</a>
+<a class="o2" href="#d3-13">参考解</a>
+<a class="o2" href="#d3-14">面试官追问 &amp; 对照源码</a></aside>
 </div>
 <button class="theme-btn" type="button" id="theme-btn">◐ 主题</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
